@@ -116,6 +116,63 @@ std::pair<TaskHandle, std::function<void()>> TaskExecutor::submit_deferred(std::
     return { TaskHandle(id, node, this), std::move(submit_fn) };
 }
 
+TaskHandle TaskExecutor::when_all(const Location& location, const std::vector<TaskHandle>& handles, TaskPriority priority) {
+    if (handles.empty()) {
+        return add_task(location, priority, [](){});
+    }
+
+    auto counter = std::make_shared<std::atomic<size_t>>(handles.size());
+    
+    // Create the aggregate task, deferred.
+    auto [agg_handle, submit_fn] = submit_deferred([](){}, nullptr, location.file_, location.line_, priority);
+    auto shared_submit = std::make_shared<std::function<void()>>(std::move(submit_fn));
+
+    for (const auto& h : handles) {
+        if (h.node_) {
+            h.node_->add_continuation([counter, shared_submit]() {
+                if (counter->fetch_sub(1) == 1) {
+                    (*shared_submit)();
+                }
+            });
+        } else {
+            // Handle invalid/empty handle? Treat as done?
+            if (counter->fetch_sub(1) == 1) {
+                (*shared_submit)();
+            }
+        }
+    }
+    return agg_handle;
+}
+
+TaskHandle TaskExecutor::when_any(const Location& location, const std::vector<TaskHandle>& handles, TaskPriority priority) {
+    if (handles.empty()) {
+        return add_task(location, priority, [](){});
+    }
+
+    auto flag = std::make_shared<std::atomic<bool>>(false);
+    
+    // Create the aggregate task, deferred.
+    auto [agg_handle, submit_fn] = submit_deferred([](){}, nullptr, location.file_, location.line_, priority);
+    auto shared_submit = std::make_shared<std::function<void()>>(std::move(submit_fn));
+
+    for (const auto& h : handles) {
+        if (h.node_) {
+            h.node_->add_continuation([flag, shared_submit]() {
+                bool expected = false;
+                if (flag->compare_exchange_strong(expected, true)) {
+                    (*shared_submit)();
+                }
+            });
+        } else {
+            bool expected = false;
+            if (flag->compare_exchange_strong(expected, true)) {
+                (*shared_submit)();
+            }
+        }
+    }
+    return agg_handle;
+}
+
 void TaskExecutor::cancel_task(TaskID id) {
     std::lock_guard<std::mutex> lock(status_mutex_);
     // Mark the ID as cancelled. 

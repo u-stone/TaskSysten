@@ -84,6 +84,7 @@ public:
     TaskHandle then(const Location& location, Func&& f, Args&&... args);
 
 private:
+    friend class TaskExecutor;
     size_t id_ = 0;
     std::shared_ptr<TaskNode> node_;
     TaskExecutor* exec_ = nullptr;
@@ -163,6 +164,16 @@ public:
      * @param id The ID of the task to cancel.
      */
     void cancel_task(TaskID id);
+
+    /**
+     * @brief Creates a task that completes when all of the supplied tasks have completed.
+     */
+    TaskHandle when_all(const Location& location, const std::vector<TaskHandle>& handles, TaskPriority priority = TaskPriority::NORMAL);
+
+    /**
+     * @brief Creates a task that completes when any of the supplied tasks have completed.
+     */
+    TaskHandle when_any(const Location& location, const std::vector<TaskHandle>& handles, TaskPriority priority = TaskPriority::NORMAL);
 
     /**
      * @brief Returns the current number of worker threads in the underlying pool.
