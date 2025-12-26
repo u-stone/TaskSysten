@@ -174,3 +174,27 @@ TEST(TaskExecutorTest, PriorityExecution) {
     EXPECT_EQ(execution_order[0], 2);
     EXPECT_EQ(execution_order[1], 0);
 }
+
+// Test 9: Chain Execution (then)
+TEST(TaskExecutorTest, ChainExecution) {
+    ThreadPoolConfig config;
+    config.min_threads = 2;
+    config.max_threads = 4;
+    TaskExecutor executor(config);
+
+    std::atomic<int> stage{0};
+
+    auto h1 = executor.add_task(TASK_FROM_HERE, [&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        stage = 1;
+    });
+
+    h1.then(TASK_FROM_HERE, [&]() {
+        if (stage == 1) stage = 2;
+    }).then(TASK_FROM_HERE, [&]() {
+        if (stage == 2) stage = 3;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(stage, 3);
+}

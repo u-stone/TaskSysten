@@ -19,11 +19,12 @@ TaskExecutor::~TaskExecutor() {
     // which handles stopping and joining threads.
 }
 
-TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
+TaskHandle TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
     TaskID id = next_task_id_++;
+    auto node = std::make_shared<TaskNode>();
     
     // Create a wrapper lambda that includes cancellation logic and task/callback execution
-    auto wrapped_task_for_pool = [this, id, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
+    auto wrapped_task_for_pool = [this, id, node, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
         // Check for cancellation
         bool is_cancelled = false;
         {
@@ -62,11 +63,57 @@ TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, s
         if (callback) {
             callback();
         }
+
+        // Trigger continuations
+        node->run_continuations();
     };
 
     // Submit the wrapped task to the underlying thread pool
     thread_pool_->submit(std::move(wrapped_task_for_pool), priority);
-    return id;
+    return TaskHandle(id, node, this);
+}
+
+std::pair<TaskHandle, std::function<void()>> TaskExecutor::submit_deferred(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
+    TaskID id = next_task_id_++;
+    auto node = std::make_shared<TaskNode>();
+
+    auto wrapped_task_for_pool = [this, id, node, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
+        bool is_cancelled = false;
+        {
+            std::lock_guard<std::mutex> lock(status_mutex_);
+            auto it = cancelled_tasks_.find(id);
+            if (it != cancelled_tasks_.end()) {
+                is_cancelled = true;
+                cancelled_tasks_.erase(it);
+            }
+        }
+
+        if (!is_cancelled) {
+            if (task) {
+                try {
+                    auto start_time = std::chrono::steady_clock::now();
+                    task();
+                    auto end_time = std::chrono::steady_clock::now();
+                    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+                    if (duration_ms > 500) {
+                        LOG_WARN() << "Task " << id << " (" << file << ":" << line << ") execution time " << duration_ms << "ms exceeded 500ms threshold";
+                    }
+                } catch (const std::exception& e) {
+                    LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw exception: " << e.what();
+                } catch (...) {
+                    LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw unknown exception.";
+                }
+            }
+            if (callback) callback();
+            node->run_continuations();
+        }
+    };
+
+    auto submit_fn = [this, wrapped = std::move(wrapped_task_for_pool), priority]() mutable {
+        thread_pool_->submit(std::move(wrapped), priority);
+    };
+
+    return { TaskHandle(id, node, this), std::move(submit_fn) };
 }
 
 void TaskExecutor::cancel_task(TaskID id) {
