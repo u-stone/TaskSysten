@@ -34,11 +34,12 @@ ThreadPool::~ThreadPool() {
     LOG_INFO() << "ThreadPool destroyed. All threads joined.";
 }
 
-void ThreadPool::submit(std::function<void()> task) {
+void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         auto now = std::chrono::steady_clock::now();
-        tasks_queue_.push({std::move(task), now}); // Add the task to the queue with timestamp
+        tasks_queue_.push_back({std::move(task), now, priority}); // Add the task to the queue with timestamp
+        std::push_heap(tasks_queue_.begin(), tasks_queue_.end());
 
         // Dynamic sizing logic: Check latency of the oldest task
         if (current_threads_count_ < config_.max_threads) {
@@ -51,7 +52,7 @@ void ThreadPool::submit(std::function<void()> task) {
                         should_grow = true;
                     }
                 } else { // WAIT_TIME
-                    auto oldest_task_time = tasks_queue_.front().enqueue_time;
+                    auto oldest_task_time = tasks_queue_.front().enqueue_time; // front() is the max element (highest priority)
                     auto wait_duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - oldest_task_time).count();
                     if (static_cast<size_t>(wait_duration) > config_.max_wait_time_ms) {
                         should_grow = true;
@@ -86,8 +87,9 @@ void ThreadPool::worker_thread() {
                 return;
             }
 
-            task = std::move(tasks_queue_.front().task); // Retrieve the task
-            tasks_queue_.pop(); // Remove it from the queue
+            std::pop_heap(tasks_queue_.begin(), tasks_queue_.end());
+            task = std::move(tasks_queue_.back().task); // Retrieve the task
+            tasks_queue_.pop_back(); // Remove it from the queue
         }
 
         // Execute the task

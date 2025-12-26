@@ -57,10 +57,16 @@ public:
      * @return TaskID A unique identifier for the submitted task.
      */
     template <typename Func, typename... Args>
-    TaskID add_task(const Location& location, Func&& f, Args&&... args) {
+    TaskID add_task(const Location& location, TaskPriority priority, Func&& f, Args&&... args) {
         // Create a wrapper that binds arguments to the function
         auto func = std::bind(std::forward<Func>(f), std::forward<Args>(args)...);
-        return submit_internal([func]() { func(); }, nullptr, location.file_, location.line_);
+        return submit_internal([func]() { func(); }, nullptr, location.file_, location.line_, priority);
+    }
+
+    // Overload for default priority (NORMAL)
+    template <typename Func, typename... Args, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Func>, TaskPriority>>>
+    TaskID add_task(const Location& location, Func&& f, Args&&... args) {
+        return add_task(location, TaskPriority::NORMAL, std::forward<Func>(f), std::forward<Args>(args)...);
     }
 
     /**
@@ -73,12 +79,18 @@ public:
      * @return TaskID A unique identifier.
      */
     template <typename Func, typename Callback>
-    TaskID add_task_with_callback(const Location& location, Func&& f, Callback&& cb) {
+    TaskID add_task_with_callback(const Location& location, TaskPriority priority, Func&& f, Callback&& cb) {
         return submit_internal(
             std::forward<Func>(f),
             std::forward<Callback>(cb),
-            location.file_, location.line_
+            location.file_, location.line_,
+            priority
         );
+    }
+
+    template <typename Func, typename Callback, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Func>, TaskPriority>>>
+    TaskID add_task_with_callback(const Location& location, Func&& f, Callback&& cb) {
+        return add_task_with_callback(location, TaskPriority::NORMAL, std::forward<Func>(f), std::forward<Callback>(cb));
     }
 
     /**
@@ -96,7 +108,7 @@ public:
 
 private:
     // Internal submission logic
-    TaskID submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line);
+    TaskID submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority);
 
     // Task Management
     std::atomic<TaskID> next_task_id_;

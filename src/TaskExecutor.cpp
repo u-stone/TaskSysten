@@ -19,7 +19,7 @@ TaskExecutor::~TaskExecutor() {
     // which handles stopping and joining threads.
 }
 
-TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line) {
+TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
     TaskID id = next_task_id_++;
     
     // Create a wrapper lambda that includes cancellation logic and task/callback execution
@@ -65,7 +65,7 @@ TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, s
     };
 
     // Submit the wrapped task to the underlying thread pool
-    thread_pool_->submit(std::move(wrapped_task_for_pool));
+    thread_pool_->submit(std::move(wrapped_task_for_pool), priority);
     return id;
 }
 

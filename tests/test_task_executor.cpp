@@ -138,3 +138,39 @@ TEST(TaskExecutorTest, ExceptionLoggingWithLocation) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
+
+// Test 8: Priority Execution
+TEST(TaskExecutorTest, PriorityExecution) {
+    // 1 thread to ensure serialization and order check
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 1;
+    TaskExecutor executor(config);
+
+    std::vector<int> execution_order;
+    std::mutex mutex;
+
+    // Block the thread first
+    executor.add_task(TASK_FROM_HERE, []() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    });
+
+    // Add Low priority task
+    executor.add_task(TASK_FROM_HERE, TaskPriority::LOW, [&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        execution_order.push_back(0); // 0 for Low
+    });
+
+    // Add High priority task
+    executor.add_task(TASK_FROM_HERE, TaskPriority::HIGH, [&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        execution_order.push_back(2); // 2 for High
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    
+    // Expect High (2) then Low (0) because the thread was blocked when they were added
+    ASSERT_EQ(execution_order.size(), 2);
+    EXPECT_EQ(execution_order[0], 2);
+    EXPECT_EQ(execution_order[1], 0);
+}
