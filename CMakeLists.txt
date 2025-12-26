@@ -12,13 +12,14 @@ find_package(Threads REQUIRED)
 add_library(task_engine 
     src/TaskExecutor.cpp
     src/ThreadPool.cpp
+    src/Logger.cpp
 )
 target_include_directories(task_engine PUBLIC src)
 target_link_libraries(task_engine PRIVATE Threads::Threads)
 
 # --- Examples ---
-add_executable(example_app examples/main.cpp)
-target_link_libraries(example_app PRIVATE task_engine)
+add_executable(example examples/main.cpp)
+target_link_libraries(example PRIVATE task_engine)
 
 # --- Testing ---
 enable_testing()

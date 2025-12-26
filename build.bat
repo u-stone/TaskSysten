@@ -29,6 +29,11 @@ echo [INFO] Building project...
 cmake --build . --config Debug
 if %errorlevel% neq 0 goto :error
 
+:: 编译示例代码
+echo [INFO] Building examples...
+cmake --build . --target example --config Debug
+if %errorlevel% neq 0 goto :error
+
 :: 4. 运行单元测试
 echo [INFO] Running Unit Tests...
 :: -C Debug 指定配置，--output-on-failure 在失败时输出详细信息
@@ -37,11 +42,11 @@ if %errorlevel% neq 0 goto :error
 
 :: 5. 运行示例程序
 echo [INFO] Running Example...
-:: Visual Studio 生成的可执行文件通常位于 Debug 子目录中，名称为 example_app.exe
-if exist "examples\Debug\example_app.exe" (
-    "examples\Debug\example_app.exe"
-) else if exist "examples\example_app.exe" (
-    "examples\example_app.exe"
+:: Visual Studio 生成的可执行文件通常位于 Debug 子目录中，名称为 example.exe
+if exist "Debug\example.exe" (
+    "Debug\example.exe"
+) else if exist "examples\Debug\example.exe" (
+    "examples\Debug\example.exe"
 ) else (
     echo [WARN] Example executable not found in expected paths.
 )
