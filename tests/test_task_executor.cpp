@@ -198,3 +198,50 @@ TEST(TaskExecutorTest, ChainExecution) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     EXPECT_EQ(stage, 3);
 }
+
+// Test 10: WhenAll
+TEST(TaskExecutorTest, WhenAll) {
+    ThreadPoolConfig config;
+    config.min_threads = 2;
+    config.max_threads = 4;
+    TaskExecutor executor(config);
+
+    std::atomic<int> counter{0};
+    std::vector<TaskHandle> handles;
+
+    for (int i = 0; i < 5; ++i) {
+        handles.push_back(executor.add_task(TASK_FROM_HERE, [&]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            counter++;
+        }));
+    }
+
+    std::atomic<bool> all_done{false};
+    executor.when_all(TASK_FROM_HERE, handles).then(TASK_FROM_HERE, [&]() {
+        all_done = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(counter, 5);
+    EXPECT_TRUE(all_done);
+}
+
+// Test 11: WhenAny
+TEST(TaskExecutorTest, WhenAny) {
+    ThreadPoolConfig config;
+    config.min_threads = 2;
+    config.max_threads = 4;
+    TaskExecutor executor(config);
+
+    std::vector<TaskHandle> handles;
+    handles.push_back(executor.add_task(TASK_FROM_HERE, []() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); }));
+    handles.push_back(executor.add_task(TASK_FROM_HERE, []() { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }));
+
+    std::atomic<bool> any_done{false};
+    executor.when_any(TASK_FROM_HERE, handles).then(TASK_FROM_HERE, [&]() {
+        any_done = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Enough for first task, not second
+    EXPECT_TRUE(any_done);
+}
