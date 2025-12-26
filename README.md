@@ -37,7 +37,9 @@ A high-performance, thread-safe C++17 Task Execution Module.
 #include "TaskExecutor.h"
 
 int main() {
-    task_engine::TaskExecutor executor(2, 8, 3); // Min 2 threads, max 8 threads, grow if queue > 3
+    // Initialize TaskExecutor, which internally creates a ThreadPool
+    // min_threads=2, max_threads=8, grow_threshold=3 for the underlying thread pool
+    task_engine::TaskExecutor executor(2, 8, 3); 
 
     // Add a simple task
     executor.add_task([]{ 

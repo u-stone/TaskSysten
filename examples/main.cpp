@@ -14,7 +14,7 @@ int main() {
 
     // 1. Initialize Executor with min_threads=2, max_threads=8, queue_grow_threshold=3
     // This means it starts with 2 threads, and will add more if the queue has >3 tasks, up to 8 threads.
-    TaskExecutor executor(2, 8, 3);
+    TaskExecutor executor(2, 8, 3); // These parameters are now passed to the internal ThreadPool
 
     std::cout << "Submitting 10 tasks to observe dynamic growth..." << std::endl;
     std::vector<TaskExecutor::TaskID> task_ids;

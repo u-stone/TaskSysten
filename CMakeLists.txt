@@ -11,6 +11,7 @@ find_package(Threads REQUIRED)
 # --- Source Code ---
 add_library(task_engine 
     src/TaskExecutor.cpp
+    src/ThreadPool.cpp
 )
 target_include_directories(task_engine PUBLIC src)
 target_link_libraries(task_engine PRIVATE Threads::Threads)
