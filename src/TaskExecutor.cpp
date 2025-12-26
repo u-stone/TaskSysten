@@ -6,14 +6,15 @@
 
 namespace task_engine {
  
-TaskExecutor::TaskExecutor(size_t min_threads, size_t max_threads, size_t max_wait_time_ms)
+TaskExecutor::TaskExecutor(const ThreadPoolConfig& config)
     : next_task_id_(1),
-      thread_pool_(std::make_unique<ThreadPool>(min_threads, max_threads, max_wait_time_ms))
+      thread_pool_(std::make_unique<ThreadPool>(config))
 {
     // The ThreadPool constructor handles its own thread initialization.
 }
 
 TaskExecutor::~TaskExecutor() {
+    LOG_INFO() << "TaskExecutor shutting down...";
     // The unique_ptr to ThreadPool will automatically call its destructor,
     // which handles stopping and joining threads.
 }
