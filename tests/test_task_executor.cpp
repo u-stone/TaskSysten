@@ -73,7 +73,7 @@ TEST(TaskExecutorTest, Cancellation) {
 
 // Test 5: Multiple Threads
 TEST(TaskExecutorTest, HighLoad) {
-    TaskExecutor executor(2, 8, 3); // Test with dynamic pool settings
+    TaskExecutor executor(2, 8, 50); // Test with dynamic pool settings (50ms wait threshold)
     std::atomic<int> counter{0};
     const int num_tasks = 100;
 
@@ -89,8 +89,8 @@ TEST(TaskExecutorTest, HighLoad) {
 
 // Test 6: Dynamic Thread Growth (basic check)
 TEST(TaskExecutorTest, DynamicGrowth) {
-    // Start with 1 thread, max 4, grow if queue > 1
-    TaskExecutor executor(1, 4, 1); 
+    // Start with 1 thread, max 4, grow if wait time > 1ms
+    TaskExecutor executor(1, 4, 1);
     std::atomic<int> counter{0};
     const int num_tasks = 10;
 
