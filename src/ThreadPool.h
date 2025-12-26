@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 #include <algorithm> // For std::max
+#include <chrono>
 
 namespace task_engine {
 
@@ -21,11 +22,11 @@ public:
      * @brief Constructs a ThreadPool with dynamic sizing capabilities.
      * @param min_threads Initial number of worker threads.
      * @param max_threads Maximum number of worker threads the pool can grow to.
-     * @param queue_grow_threshold If the task queue size exceeds this, a new thread might be spawned (up to max_threads).
+     * @param max_wait_time_ms If a task waits longer than this (ms), a new thread might be spawned.
      */
     explicit ThreadPool(size_t min_threads = std::thread::hardware_concurrency(),
                         size_t max_threads = std::thread::hardware_concurrency() * 2,
-                        size_t queue_grow_threshold = 10);
+                        size_t max_wait_time_ms = 100);
 
     /**
      * @brief Destructor. Stops all threads and joins them.
@@ -54,8 +55,13 @@ private:
     // Worker thread loop function
     void worker_thread();
 
+    struct TaskEntry {
+        std::function<void()> task;
+        std::chrono::steady_clock::time_point enqueue_time;
+    };
+
     std::vector<std::thread> threads_; // Collection of worker threads
-    std::queue<std::function<void()>> tasks_queue_; // Queue of tasks to be executed
+    std::queue<TaskEntry> tasks_queue_; // Queue of tasks to be executed
 
     std::mutex queue_mutex_; // Mutex to protect the task queue
     std::condition_variable condition_; // Condition variable to signal workers
@@ -63,8 +69,9 @@ private:
 
     const size_t min_threads_; // Minimum number of threads in the pool
     const size_t max_threads_; // Maximum number of threads in the pool
-    const size_t queue_grow_threshold_; // Threshold for queue size to consider spawning new threads
+    const size_t max_wait_time_ms_; // Threshold for task wait time
     std::atomic<size_t> current_threads_count_; // Tracks the actual number of running threads
+    std::chrono::steady_clock::time_point last_spawn_time_; // For rate limiting thread creation
 };
 
 } // namespace task_engine

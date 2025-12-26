@@ -3,12 +3,13 @@
 
 namespace task_engine {
 
-ThreadPool::ThreadPool(size_t min_threads, size_t max_threads, size_t queue_grow_threshold)
+ThreadPool::ThreadPool(size_t min_threads, size_t max_threads, size_t max_wait_time_ms)
     : min_threads_(min_threads),
       max_threads_(std::max(min_threads, max_threads)), // Ensure max_threads >= min_threads
-      queue_grow_threshold_(queue_grow_threshold),
+      max_wait_time_ms_(max_wait_time_ms),
       stop_flag_(false),
-      current_threads_count_(0)
+      current_threads_count_(0),
+      last_spawn_time_(std::chrono::steady_clock::now())
 {
     // Initialize worker threads up to min_threads
     for (size_t i = 0; i < min_threads_; ++i) {
@@ -35,13 +36,21 @@ ThreadPool::~ThreadPool() {
 void ThreadPool::submit(std::function<void()> task) {
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);
-        tasks_queue_.push(std::move(task)); // Add the task to the queue
+        auto now = std::chrono::steady_clock::now();
+        tasks_queue_.push({std::move(task), now}); // Add the task to the queue with timestamp
 
-        // Dynamic sizing logic: If queue is too long, consider adding a new thread
-        if (tasks_queue_.size() > queue_grow_threshold_ && current_threads_count_ < max_threads_) {
-            threads_.emplace_back(&ThreadPool::worker_thread, this);
-            current_threads_count_++;
-            // std::cout << "DEBUG: Spawning new thread. Total threads: " << current_threads_count_ << std::endl;
+        // Dynamic sizing logic: Check latency of the oldest task
+        if (current_threads_count_ < max_threads_) {
+            auto oldest_task_time = tasks_queue_.front().enqueue_time;
+            auto wait_duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - oldest_task_time).count();
+            auto time_since_last_spawn = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_spawn_time_).count();
+
+            // If wait time exceeds threshold AND we haven't spawned recently (e.g., 200ms cooldown)
+            if (wait_duration > max_wait_time_ms_ && time_since_last_spawn > 200) {
+                threads_.emplace_back(&ThreadPool::worker_thread, this);
+                current_threads_count_++;
+                last_spawn_time_ = now;
+            }
         }
     }
     condition_.notify_one(); // Notify one waiting thread that a new task is available
@@ -64,7 +73,7 @@ void ThreadPool::worker_thread() {
                 return;
             }
 
-            task = std::move(tasks_queue_.front()); // Retrieve the task
+            task = std::move(tasks_queue_.front().task); // Retrieve the task
             tasks_queue_.pop(); // Remove it from the queue
         }
 

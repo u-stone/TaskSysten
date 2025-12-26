@@ -37,11 +37,11 @@ public:
      * @param num_threads Number of worker threads (default: hardware concurrency).
      * @param min_threads Initial number of worker threads for the underlying thread pool.
      * @param max_threads Maximum number of worker threads for the underlying thread pool.
-     * @param queue_grow_threshold If the task queue size exceeds this, a new thread might be spawned in the pool.
+     * @param max_wait_time_ms If a task waits longer than this (ms), a new thread might be spawned.
      */
     explicit TaskExecutor(size_t min_threads = std::thread::hardware_concurrency(),
                           size_t max_threads = std::thread::hardware_concurrency() * 2,
-                          size_t queue_grow_threshold = 10); // Default values
+                          size_t max_wait_time_ms = 100); // Default values
 
     /**
      * @brief Destructor. Stops all threads and joins them.

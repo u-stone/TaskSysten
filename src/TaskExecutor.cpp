@@ -2,12 +2,13 @@
 #include "Logger.h"
 #include <utility> // For std::move
 #include <string>
+#include <chrono>
 
 namespace task_engine {
  
-TaskExecutor::TaskExecutor(size_t min_threads, size_t max_threads, size_t queue_grow_threshold)
+TaskExecutor::TaskExecutor(size_t min_threads, size_t max_threads, size_t max_wait_time_ms)
     : next_task_id_(1),
-      thread_pool_(std::make_unique<ThreadPool>(min_threads, max_threads, queue_grow_threshold))
+      thread_pool_(std::make_unique<ThreadPool>(min_threads, max_threads, max_wait_time_ms))
 {
     // The ThreadPool constructor handles its own thread initialization.
 }
@@ -42,7 +43,13 @@ TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, s
         // Execute Task
         if (task) {
             try {
+                auto start_time = std::chrono::steady_clock::now();
                 task();
+                auto end_time = std::chrono::steady_clock::now();
+                auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+                if (duration_ms > 500) {
+                    LOG_WARN() << "Task " << id << " (" << file << ":" << line << ") execution time " << duration_ms << "ms exceeded 500ms threshold";
+                }
             } catch (const std::exception& e) {
                 LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw exception: " << e.what();
             } catch (...) {
