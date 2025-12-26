@@ -7,7 +7,7 @@ using namespace task_engine;
 
 // Test 1: Basic Execution
 TEST(TaskExecutorTest, BasicExecution) {
-    TaskExecutor executor(2);
+    TaskExecutor executor(1, 2, 1); // Use dynamic pool parameters for consistency
     std::atomic<bool> executed{false};
 
     executor.add_task([&]() {
@@ -21,7 +21,7 @@ TEST(TaskExecutorTest, BasicExecution) {
 
 // Test 2: Arguments Passing
 TEST(TaskExecutorTest, ArgumentsPassing) {
-    TaskExecutor executor(2);
+    TaskExecutor executor(1, 2, 1);
     std::atomic<int> result{0};
 
     executor.add_task([&](int a, int b) {
@@ -34,7 +34,7 @@ TEST(TaskExecutorTest, ArgumentsPassing) {
 
 // Test 3: Callback Execution
 TEST(TaskExecutorTest, CallbackExecution) {
-    TaskExecutor executor(2);
+    TaskExecutor executor(1, 2, 1);
     std::atomic<bool> task_done{false};
     std::atomic<bool> callback_done{false};
 
@@ -50,7 +50,7 @@ TEST(TaskExecutorTest, CallbackExecution) {
 
 // Test 4: Cancellation
 TEST(TaskExecutorTest, Cancellation) {
-    TaskExecutor executor(2);
+    TaskExecutor executor(1, 2, 1);
     std::atomic<bool> executed{false};
 
     // Add a task that sleeps to block a thread, ensuring the next task sits in queue briefly
@@ -72,7 +72,7 @@ TEST(TaskExecutorTest, Cancellation) {
 
 // Test 5: Multiple Threads
 TEST(TaskExecutorTest, HighLoad) {
-    TaskExecutor executor(4);
+    TaskExecutor executor(2, 8, 3); // Test with dynamic pool settings
     std::atomic<int> counter{0};
     const int num_tasks = 100;
 
@@ -84,4 +84,21 @@ TEST(TaskExecutorTest, HighLoad) {
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
     EXPECT_EQ(counter, num_tasks);
+}
+
+// Test 6: Dynamic Thread Growth (basic check)
+TEST(TaskExecutorTest, DynamicGrowth) {
+    // Start with 1 thread, max 4, grow if queue > 1
+    TaskExecutor executor(1, 4, 1); 
+    std::atomic<int> counter{0};
+    const int num_tasks = 10;
+
+    for(int i=0; i<num_tasks; ++i) {
+        executor.add_task([&]() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); counter++; });
+    }
+    
+    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Give time for threads to potentially spawn
+    EXPECT_GE(executor.get_worker_count(), 1); // At least min_threads
+    EXPECT_LE(executor.get_worker_count(), 4); // Not more than max_threads
+    EXPECT_EQ(counter, num_tasks); // All tasks should eventually complete
 }
