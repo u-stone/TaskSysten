@@ -12,6 +12,12 @@
 
 namespace task_engine {
 
+enum class TaskPriority {
+    LOW = 0,
+    NORMAL = 1,
+    HIGH = 2
+};
+
 enum class ScalingStrategy {
     QUEUE_LENGTH, // Grow based on number of pending tasks
     WAIT_TIME     // Grow based on task wait time (latency)
@@ -51,7 +57,7 @@ public:
      * @brief Submits a task to the thread pool for execution.
      * @param task The callable object to execute.
      */
-    void submit(std::function<void()> task);
+    void submit(std::function<void()> task, TaskPriority priority = TaskPriority::NORMAL);
 
     /**
      * @brief Returns the current number of active worker threads.
@@ -68,10 +74,19 @@ private:
     struct TaskEntry {
         std::function<void()> task;
         std::chrono::steady_clock::time_point enqueue_time;
+        TaskPriority priority;
+
+        // Max heap: largest element at top.
+        bool operator<(const TaskEntry& other) const {
+            if (priority != other.priority) {
+                return priority < other.priority;
+            }
+            return enqueue_time > other.enqueue_time; // Older time (smaller) means higher priority (greater) in heap
+        }
     };
 
     std::vector<std::thread> threads_; // Collection of worker threads
-    std::queue<TaskEntry> tasks_queue_; // Queue of tasks to be executed
+    std::vector<TaskEntry> tasks_queue_; // Priority Queue of tasks to be executed (using heap)
 
     std::mutex queue_mutex_; // Mutex to protect the task queue
     std::condition_variable condition_; // Condition variable to signal workers
