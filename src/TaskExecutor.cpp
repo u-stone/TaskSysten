@@ -1,5 +1,5 @@
 #include "TaskExecutor.h"
-#include <iostream>
+#include "Logger.h"
 #include <utility> // For std::move
 
 namespace task_engine {
@@ -43,9 +43,9 @@ TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, s
             try {
                 task();
             } catch (const std::exception& e) {
-                std::cerr << "Task " << id << " threw exception: " << e.what() << std::endl;
+                LOG_ERROR() << "Task " << id << " threw exception: " << e.what();
             } catch (...) {
-                std::cerr << "Task " << id << " threw unknown exception." << std::endl;
+                LOG_ERROR() << "Task " << id << " threw unknown exception.";
             }
         }
 
