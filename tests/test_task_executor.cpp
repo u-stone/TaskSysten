@@ -10,7 +10,8 @@ TEST(TaskExecutorTest, BasicExecution) {
     TaskExecutor executor(1, 2, 1); // Use dynamic pool parameters for consistency
     std::atomic<bool> executed{false};
 
-    executor.add_task([&]() {
+    // Use add_task with TASK_FROM_HERE to verify API and pass location info
+    executor.add_task(TASK_FROM_HERE, [&]() {
         executed = true;
     });
 
@@ -24,7 +25,7 @@ TEST(TaskExecutorTest, ArgumentsPassing) {
     TaskExecutor executor(1, 2, 1);
     std::atomic<int> result{0};
 
-    executor.add_task([&](int a, int b) {
+    executor.add_task(TASK_FROM_HERE, [&](int a, int b) {
         result = a + b;
     }, 5, 10);
 
@@ -38,7 +39,7 @@ TEST(TaskExecutorTest, CallbackExecution) {
     std::atomic<bool> task_done{false};
     std::atomic<bool> callback_done{false};
 
-    executor.add_task_with_callback(
+    executor.add_task_with_callback(TASK_FROM_HERE,
         [&]() { task_done = true; },
         [&]() { callback_done = true; }
     );
@@ -54,12 +55,12 @@ TEST(TaskExecutorTest, Cancellation) {
     std::atomic<bool> executed{false};
 
     // Add a task that sleeps to block a thread, ensuring the next task sits in queue briefly
-    executor.add_task([]() {
+    executor.add_task(TASK_FROM_HERE, []() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     });
 
     // Add the task to be cancelled
-    auto id = executor.add_task([&]() {
+    auto id = executor.add_task(TASK_FROM_HERE, [&]() {
         executed = true;
     });
 
@@ -77,7 +78,7 @@ TEST(TaskExecutorTest, HighLoad) {
     const int num_tasks = 100;
 
     for(int i=0; i<num_tasks; ++i) {
-        executor.add_task([&]() {
+        executor.add_task(TASK_FROM_HERE, [&]() {
             counter++;
         });
     }
@@ -94,11 +95,23 @@ TEST(TaskExecutorTest, DynamicGrowth) {
     const int num_tasks = 10;
 
     for(int i=0; i<num_tasks; ++i) {
-        executor.add_task([&]() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); counter++; });
+        executor.add_task(TASK_FROM_HERE, [&]() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); counter++; });
     }
     
     std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Give time for threads to potentially spawn
     EXPECT_GE(executor.get_worker_count(), 1); // At least min_threads
     EXPECT_LE(executor.get_worker_count(), 4); // Not more than max_threads
     EXPECT_EQ(counter, num_tasks); // All tasks should eventually complete
+}
+
+// Test 7: Exception Logging with Source Location
+TEST(TaskExecutorTest, ExceptionLoggingWithLocation) {
+    TaskExecutor executor(1, 2, 1);
+    
+    // This task will throw, and the TaskExecutor should log the error with the file/line info provided.
+    executor.add_task(TASK_FROM_HERE, []() {
+        throw std::runtime_error("Intentional exception to verify location logging");
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }

@@ -10,9 +10,20 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <type_traits>
 
 #include "ThreadPool.h" // Include the new ThreadPool header
 namespace task_engine {
+
+/**
+ * @brief Represents a source code location (file and line).
+ */
+struct Location {
+    const char* file_ = "unknown";
+    int line_ = 0;
+    Location(const char* file, int line) : file_(file), line_(line) {}
+    Location() = default;
+};
 
 /**
  * @brief A thread-safe task execution module supporting cancellation and callbacks.
@@ -51,10 +62,10 @@ public:
      * @return TaskID A unique identifier for the submitted task.
      */
     template <typename Func, typename... Args>
-    TaskID add_task(Func&& f, Args&&... args) {
+    TaskID add_task(const Location& location, Func&& f, Args&&... args) {
         // Create a wrapper that binds arguments to the function
         auto func = std::bind(std::forward<Func>(f), std::forward<Args>(args)...);
-        return submit_internal([func]() { func(); }, nullptr);
+        return submit_internal([func]() { func(); }, nullptr, location.file_, location.line_);
     }
 
     /**
@@ -67,10 +78,11 @@ public:
      * @return TaskID A unique identifier.
      */
     template <typename Func, typename Callback>
-    TaskID add_task_with_callback(Func&& f, Callback&& cb) {
+    TaskID add_task_with_callback(const Location& location, Func&& f, Callback&& cb) {
         return submit_internal(
             std::forward<Func>(f),
-            std::forward<Callback>(cb)
+            std::forward<Callback>(cb),
+            location.file_, location.line_
         );
     }
 
@@ -89,7 +101,7 @@ public:
 
 private:
     // Internal submission logic
-    TaskID submit_internal(std::function<void()> task, std::function<void()> callback);
+    TaskID submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line);
 
     // Task Management
     std::atomic<TaskID> next_task_id_;
@@ -99,5 +111,8 @@ private:
     // The underlying thread pool instance
     std::unique_ptr<ThreadPool> thread_pool_;
 };
+
+// Helper macro to pass current file and line number
+#define TASK_FROM_HERE task_engine::Location(__FILE__, __LINE__)
 
 } // namespace task_engine
