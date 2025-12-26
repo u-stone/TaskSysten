@@ -3,22 +3,22 @@
 
 namespace task_engine {
 
-ThreadPool::ThreadPool(size_t min_threads, size_t max_threads, size_t max_wait_time_ms)
-    : min_threads_(min_threads),
-      max_threads_(std::max(min_threads, max_threads)), // Ensure max_threads >= min_threads
-      max_wait_time_ms_(max_wait_time_ms),
+ThreadPool::ThreadPool(const ThreadPoolConfig& config)
+    : config_(config),
       stop_flag_(false),
       current_threads_count_(0),
       last_spawn_time_(std::chrono::steady_clock::now())
 {
+    config_.max_threads = std::max(config_.min_threads, config_.max_threads); // Ensure max >= min
     // Initialize worker threads up to min_threads
-    for (size_t i = 0; i < min_threads_; ++i) {
+    for (size_t i = 0; i < config_.min_threads; ++i) {
         threads_.emplace_back(&ThreadPool::worker_thread, this);
         current_threads_count_++;
     }
 }
 
 ThreadPool::~ThreadPool() {
+    LOG_INFO() << "ThreadPool shutting down. Stopping " << threads_.size() << " threads...";
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         stop_flag_ = true; // Signal all threads to stop
@@ -31,6 +31,7 @@ ThreadPool::~ThreadPool() {
             worker.join();
         }
     }
+    LOG_INFO() << "ThreadPool destroyed. All threads joined.";
 }
 
 void ThreadPool::submit(std::function<void()> task) {
@@ -40,13 +41,25 @@ void ThreadPool::submit(std::function<void()> task) {
         tasks_queue_.push({std::move(task), now}); // Add the task to the queue with timestamp
 
         // Dynamic sizing logic: Check latency of the oldest task
-        if (current_threads_count_ < max_threads_) {
-            auto oldest_task_time = tasks_queue_.front().enqueue_time;
-            auto wait_duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - oldest_task_time).count();
+        if (current_threads_count_ < config_.max_threads) {
             auto time_since_last_spawn = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_spawn_time_).count();
 
-            // If wait time exceeds threshold AND we haven't spawned recently (e.g., 200ms cooldown)
-            if (wait_duration > max_wait_time_ms_ && time_since_last_spawn > 200) {
+            bool should_grow = false;
+            if (static_cast<size_t>(time_since_last_spawn) > config_.cooldown_ms) {
+                if (config_.strategy == ScalingStrategy::QUEUE_LENGTH) {
+                    if (tasks_queue_.size() > config_.queue_length_threshold) {
+                        should_grow = true;
+                    }
+                } else { // WAIT_TIME
+                    auto oldest_task_time = tasks_queue_.front().enqueue_time;
+                    auto wait_duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - oldest_task_time).count();
+                    if (static_cast<size_t>(wait_duration) > config_.max_wait_time_ms) {
+                        should_grow = true;
+                    }
+                }
+            }
+
+            if (should_grow) {
                 threads_.emplace_back(&ThreadPool::worker_thread, this);
                 current_threads_count_++;
                 last_spawn_time_ = now;

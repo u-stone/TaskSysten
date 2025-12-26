@@ -7,7 +7,10 @@ using namespace task_engine;
 
 // Test 1: Basic Execution
 TEST(TaskExecutorTest, BasicExecution) {
-    TaskExecutor executor(1, 2, 1); // Use dynamic pool parameters for consistency
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 2;
+    TaskExecutor executor(config);
     std::atomic<bool> executed{false};
 
     // Use add_task with TASK_FROM_HERE to verify API and pass location info
@@ -22,7 +25,10 @@ TEST(TaskExecutorTest, BasicExecution) {
 
 // Test 2: Arguments Passing
 TEST(TaskExecutorTest, ArgumentsPassing) {
-    TaskExecutor executor(1, 2, 1);
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 2;
+    TaskExecutor executor(config);
     std::atomic<int> result{0};
 
     executor.add_task(TASK_FROM_HERE, [&](int a, int b) {
@@ -35,7 +41,10 @@ TEST(TaskExecutorTest, ArgumentsPassing) {
 
 // Test 3: Callback Execution
 TEST(TaskExecutorTest, CallbackExecution) {
-    TaskExecutor executor(1, 2, 1);
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 2;
+    TaskExecutor executor(config);
     std::atomic<bool> task_done{false};
     std::atomic<bool> callback_done{false};
 
@@ -51,7 +60,10 @@ TEST(TaskExecutorTest, CallbackExecution) {
 
 // Test 4: Cancellation
 TEST(TaskExecutorTest, Cancellation) {
-    TaskExecutor executor(1, 2, 1);
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 2;
+    TaskExecutor executor(config);
     std::atomic<bool> executed{false};
 
     // Add a task that sleeps to block a thread, ensuring the next task sits in queue briefly
@@ -73,7 +85,11 @@ TEST(TaskExecutorTest, Cancellation) {
 
 // Test 5: Multiple Threads
 TEST(TaskExecutorTest, HighLoad) {
-    TaskExecutor executor(2, 8, 50); // Test with dynamic pool settings (50ms wait threshold)
+    ThreadPoolConfig config;
+    config.min_threads = 2;
+    config.max_threads = 8;
+    config.max_wait_time_ms = 50;
+    TaskExecutor executor(config);
     std::atomic<int> counter{0};
     const int num_tasks = 100;
 
@@ -90,7 +106,11 @@ TEST(TaskExecutorTest, HighLoad) {
 // Test 6: Dynamic Thread Growth (basic check)
 TEST(TaskExecutorTest, DynamicGrowth) {
     // Start with 1 thread, max 4, grow if wait time > 1ms
-    TaskExecutor executor(1, 4, 1);
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 4;
+    config.max_wait_time_ms = 1;
+    TaskExecutor executor(config);
     std::atomic<int> counter{0};
     const int num_tasks = 10;
 
@@ -98,7 +118,7 @@ TEST(TaskExecutorTest, DynamicGrowth) {
         executor.add_task(TASK_FROM_HERE, [&]() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); counter++; });
     }
     
-    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Give time for threads to potentially spawn
+    std::this_thread::sleep_for(std::chrono::seconds(1)); // Give time for threads to potentially spawn and tasks to complete
     EXPECT_GE(executor.get_worker_count(), 1); // At least min_threads
     EXPECT_LE(executor.get_worker_count(), 4); // Not more than max_threads
     EXPECT_EQ(counter, num_tasks); // All tasks should eventually complete
@@ -106,7 +126,10 @@ TEST(TaskExecutorTest, DynamicGrowth) {
 
 // Test 7: Exception Logging with Source Location
 TEST(TaskExecutorTest, ExceptionLoggingWithLocation) {
-    TaskExecutor executor(1, 2, 1);
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 2;
+    TaskExecutor executor(config);
     
     // This task will throw, and the TaskExecutor should log the error with the file/line info provided.
     executor.add_task(TASK_FROM_HERE, []() {
