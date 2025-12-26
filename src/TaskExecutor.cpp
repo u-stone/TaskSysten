@@ -1,6 +1,7 @@
 #include "TaskExecutor.h"
 #include "Logger.h"
 #include <utility> // For std::move
+#include <string>
 
 namespace task_engine {
  
@@ -16,11 +17,11 @@ TaskExecutor::~TaskExecutor() {
     // which handles stopping and joining threads.
 }
 
-TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback) {
+TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line) {
     TaskID id = next_task_id_++;
     
     // Create a wrapper lambda that includes cancellation logic and task/callback execution
-    auto wrapped_task_for_pool = [this, id, task = std::move(task), callback = std::move(callback)]() mutable {
+    auto wrapped_task_for_pool = [this, id, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
         // Check for cancellation
         bool is_cancelled = false;
         {
@@ -43,9 +44,9 @@ TaskExecutor::TaskID TaskExecutor::submit_internal(std::function<void()> task, s
             try {
                 task();
             } catch (const std::exception& e) {
-                LOG_ERROR() << "Task " << id << " threw exception: " << e.what();
+                LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw exception: " << e.what();
             } catch (...) {
-                LOG_ERROR() << "Task " << id << " threw unknown exception.";
+                LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw unknown exception.";
             }
         }
 

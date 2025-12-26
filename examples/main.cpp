@@ -19,15 +19,15 @@ int main() {
     LOG_INFO() << "Submitting 10 tasks to observe dynamic growth...";
     std::vector<TaskExecutor::TaskID> task_ids;
     for (int i = 0; i < 10; ++i) {
-        task_ids.push_back(executor.add_task(simple_function, i));
+        task_ids.push_back(executor.add_task(TASK_FROM_HERE, simple_function, i));
     }
 
-    executor.add_task([](int a, int b) {
+    executor.add_task(TASK_FROM_HERE, [](int a, int b) {
         LOG_INFO() << "[Task] Lambda sum: " << a << " + " << b << " = " << (a + b);
     }, 10, 20);
 
     // 4. Add a task with a callback
-    executor.add_task_with_callback(
+    executor.add_task_with_callback(TASK_FROM_HERE,
         []() {
             LOG_INFO() << "[Task] Heavy computation starting...";
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -39,7 +39,7 @@ int main() {
     );
 
     // Demonstrate Cancellation
-    auto task_id_to_cancel = executor.add_task([]() {
+    auto task_id_to_cancel = executor.add_task(TASK_FROM_HERE, []() {
         LOG_WARN() << "[Task] This should NOT appear.";
     });
     
