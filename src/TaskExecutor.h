@@ -15,6 +15,44 @@
 #include "ThreadPool.h" // Include the new ThreadPool header
 namespace task_engine {
 
+class TaskExecutor; // Forward declaration
+
+/**
+ * @brief Internal structure to manage task dependencies.
+ */
+struct TaskNode {
+    std::mutex mutex;
+    bool is_finished = false;
+    std::vector<std::function<void()>> continuations;
+
+    void run_continuations() {
+        std::vector<std::function<void()>> pending;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            is_finished = true;
+            pending = std::move(continuations);
+        }
+        for (auto& task : pending) {
+            task();
+        }
+    }
+
+    void add_continuation(std::function<void()> task) {
+        bool run_now = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (is_finished) {
+                run_now = true;
+            } else {
+                continuations.push_back(std::move(task));
+            }
+        }
+        if (run_now) {
+            task();
+        }
+    }
+};
+
 /**
  * @brief Represents a source code location (file and line).
  */
@@ -23,6 +61,32 @@ struct Location {
     int line_ = 0;
     Location(const char* file, int line) : file_(file), line_(line) {}
     Location() = default;
+};
+
+/**
+ * @brief A handle to a submitted task, allowing for chaining via .then().
+ */
+class TaskHandle {
+public:
+    TaskHandle() = default;
+    TaskHandle(size_t id, std::shared_ptr<TaskNode> node, TaskExecutor* exec)
+        : id_(id), node_(std::move(node)), exec_(exec) {}
+
+    // Implicit conversion to TaskID (size_t) for backward compatibility
+    operator size_t() const { return id_; }
+    size_t id() const { return id_; }
+
+    // Chain a new task to run after this one completes
+    template <typename Func, typename... Args>
+    TaskHandle then(const Location& location, TaskPriority priority, Func&& f, Args&&... args);
+
+    template <typename Func, typename... Args, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Func>, TaskPriority>>>
+    TaskHandle then(const Location& location, Func&& f, Args&&... args);
+
+private:
+    size_t id_ = 0;
+    std::shared_ptr<TaskNode> node_;
+    TaskExecutor* exec_ = nullptr;
 };
 
 /**
@@ -54,10 +118,10 @@ public:
      * @tparam Args Types of the arguments.
      * @param f The callable object (function, lambda, etc.).
      * @param args Arguments to be passed to the callable.
-     * @return TaskID A unique identifier for the submitted task.
+     * @return TaskHandle A handle for the submitted task.
      */
     template <typename Func, typename... Args>
-    TaskID add_task(const Location& location, TaskPriority priority, Func&& f, Args&&... args) {
+    TaskHandle add_task(const Location& location, TaskPriority priority, Func&& f, Args&&... args) {
         // Create a wrapper that binds arguments to the function
         auto func = std::bind(std::forward<Func>(f), std::forward<Args>(args)...);
         return submit_internal([func]() { func(); }, nullptr, location.file_, location.line_, priority);
@@ -65,7 +129,7 @@ public:
 
     // Overload for default priority (NORMAL)
     template <typename Func, typename... Args, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Func>, TaskPriority>>>
-    TaskID add_task(const Location& location, Func&& f, Args&&... args) {
+    TaskHandle add_task(const Location& location, Func&& f, Args&&... args) {
         return add_task(location, TaskPriority::NORMAL, std::forward<Func>(f), std::forward<Args>(args)...);
     }
 
@@ -76,10 +140,10 @@ public:
      * @tparam Callback Type of the callback callable.
      * @param f The main task.
      * @param cb The callback to execute after the task finishes.
-     * @return TaskID A unique identifier.
+     * @return TaskHandle A handle for the submitted task.
      */
     template <typename Func, typename Callback>
-    TaskID add_task_with_callback(const Location& location, TaskPriority priority, Func&& f, Callback&& cb) {
+    TaskHandle add_task_with_callback(const Location& location, TaskPriority priority, Func&& f, Callback&& cb) {
         return submit_internal(
             std::forward<Func>(f),
             std::forward<Callback>(cb),
@@ -89,7 +153,7 @@ public:
     }
 
     template <typename Func, typename Callback, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Func>, TaskPriority>>>
-    TaskID add_task_with_callback(const Location& location, Func&& f, Callback&& cb) {
+    TaskHandle add_task_with_callback(const Location& location, Func&& f, Callback&& cb) {
         return add_task_with_callback(location, TaskPriority::NORMAL, std::forward<Func>(f), std::forward<Callback>(cb));
     }
 
@@ -107,8 +171,13 @@ public:
     size_t get_worker_count() const;
 
 private:
+    friend class TaskHandle;
+
     // Internal submission logic
-    TaskID submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority);
+    TaskHandle submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority);
+
+    // Helper to create a task but not submit it immediately (for .then())
+    std::pair<TaskHandle, std::function<void()>> submit_deferred(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority);
 
     // Task Management
     std::atomic<TaskID> next_task_id_;
@@ -121,5 +190,26 @@ private:
 
 // Helper macro to pass current file and line number
 #define TASK_FROM_HERE task_engine::Location(__FILE__, __LINE__)
+
+// Implementation of TaskHandle templates
+template <typename Func, typename... Args>
+TaskHandle TaskHandle::then(const Location& location, TaskPriority priority, Func&& f, Args&&... args) {
+    if (!exec_) return {};
+    auto func = std::bind(std::forward<Func>(f), std::forward<Args>(args)...);
+    
+    // Create the next task but don't submit it to the thread pool yet.
+    // Instead, we get a submit_fn that we attach to the current task's node.
+    auto [handle, submit_fn] = exec_->submit_deferred([func](){ func(); }, nullptr, location.file_, location.line_, priority);
+    
+    if (node_) {
+        node_->add_continuation(std::move(submit_fn));
+    }
+    return handle;
+}
+
+template <typename Func, typename... Args, typename>
+TaskHandle TaskHandle::then(const Location& location, Func&& f, Args&&... args) {
+    return then(location, TaskPriority::NORMAL, std::forward<Func>(f), std::forward<Args>(args)...);
+}
 
 } // namespace task_engine
