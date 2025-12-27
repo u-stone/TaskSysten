@@ -21,14 +21,16 @@ void run_comparison_benchmark() {
         delays.push_back(dis(gen));
     }
 
-    auto run_bench = [&](bool enable_stealing) {
-        LOG_INFO() << "Testing with enable_task_stealing = " << (enable_stealing ? "true" : "false");
+    auto run_bench = [&](ScalingStrategy strategy, bool enable_stealing) {
+        std::string strat_name = (strategy == ScalingStrategy::QUEUE_LENGTH ? "QUEUE_LENGTH" : "WAIT_TIME");
+        LOG_INFO() << "Testing: Strategy=" << strat_name << ", Stealing=" << (enable_stealing ? "ON" : "OFF");
         
         ThreadPoolConfig config;
         config.min_threads = 4;
         config.max_threads = 16;
-        config.strategy = ScalingStrategy::QUEUE_LENGTH;
+        config.strategy = strategy;
         config.queue_length_threshold = 100;
+        config.max_wait_time_ms = 10; // Threshold for WAIT_TIME strategy
         config.enable_task_stealing = enable_stealing;
         config.enable_stealing_logs = false; // Ensure logs are disabled during benchmark
 
@@ -56,16 +58,21 @@ void run_comparison_benchmark() {
         return duration;
     };
 
-    auto time_with_stealing = run_bench(true);
-    auto time_without_stealing = run_bench(false);
+    auto q_stealing_on  = run_bench(ScalingStrategy::QUEUE_LENGTH, true);
+    auto q_stealing_off = run_bench(ScalingStrategy::QUEUE_LENGTH, false);
+    auto w_stealing_on  = run_bench(ScalingStrategy::WAIT_TIME, true);
+    auto w_stealing_off = run_bench(ScalingStrategy::WAIT_TIME, false);
 
     LOG_INFO() << "=== Comparison Summary ===";
-    LOG_INFO() << "Time with Stealing:    " << time_with_stealing << "ms";
-    LOG_INFO() << "Time without Stealing: " << time_without_stealing << "ms";
-    if (time_without_stealing > 0) {
-        double diff = (double)(time_without_stealing - time_with_stealing) / time_without_stealing * 100.0;
-        LOG_INFO() << "Task Stealing impact: " << diff << "% faster";
-    }
+    LOG_INFO() << "1. QUEUE_LENGTH + Stealing ON:  " << q_stealing_on << "ms";
+    LOG_INFO() << "2. QUEUE_LENGTH + Stealing OFF: " << q_stealing_off << "ms";
+    LOG_INFO() << "3. WAIT_TIME    + Stealing ON:  " << w_stealing_on << "ms";
+    LOG_INFO() << "4. WAIT_TIME    + Stealing OFF: " << w_stealing_off << "ms";
+    
+    double q_impact = (double)(q_stealing_off - q_stealing_on) / q_stealing_off * 100.0;
+    double w_impact = (double)(w_stealing_off - w_stealing_on) / w_stealing_off * 100.0;
+    LOG_INFO() << "Stealing Impact (QUEUE_LENGTH): " << q_impact << "% faster";
+    LOG_INFO() << "Stealing Impact (WAIT_TIME):    " << w_impact << "% faster";
 }
 
 int main() {
