@@ -489,3 +489,28 @@ TEST(TaskExecutorTest, WhenAllEmptyHandles) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     EXPECT_TRUE(triggered);
 }
+
+// Test 23: Synchronous Blocking with get()
+TEST(TaskExecutorTest, SynchronousBlockingGet) {
+    TaskExecutor executor;
+    auto h = executor.add_task(TASK_FROM_HERE, []() -> int {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        return 123;
+    });
+
+    int result = h.get();
+    EXPECT_EQ(result, 123);
+}
+
+// Test 24: Synchronous Blocking with wait()
+TEST(TaskExecutorTest, SynchronousBlockingWait) {
+    TaskExecutor executor;
+    std::atomic<bool> done{false};
+    auto h = executor.add_task(TASK_FROM_HERE, [&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        done = true;
+    });
+
+    h.wait();
+    EXPECT_TRUE(done);
+}

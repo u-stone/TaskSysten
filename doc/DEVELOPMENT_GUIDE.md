@@ -75,6 +75,12 @@
     *   **自动传播**: `.then()` 任务在执行前检查上游异常，若存在则自动重新抛出，实现异常在链条中的“冒泡”。
     *   **异常捕获接口**: 提供 `.on_error()` 接口，允许用户注册专门的错误处理逻辑。
 
+### 第十一阶段：同步阻塞获取 (Synchronous Blocking)
+**设计思路**: 在某些场景下，调用方需要等待异步任务结果才能继续，引入类似 `std::future` 的阻塞机制。
+*   **实现细节**: 
+    *   **状态同步**: 在 `TaskNodeBase` 中增加 `std::condition_variable`，任务完成时通过 `notify_all` 唤醒阻塞线程。
+    *   **阻塞接口**: `TaskHandle<T>` 提供 `wait()`（仅等待完成）和 `get()`（等待并获取结果/抛出异常）。
+
 ---
 
 ## 2. 核心架构 (Architecture)
@@ -173,6 +179,17 @@ executor.when_any(TASK_FROM_HERE, handles).then(TASK_FROM_HERE, [](){
 auto handle = executor.add_task(TASK_FROM_HERE, LongRunningJob);
 // ...
 executor.cancel_task(handle.id());
+```
+
+### 3.6 同步阻塞 (Blocking)
+在必要时同步等待任务结果。
+
+```cpp
+auto handle = executor.add_task(TASK_FROM_HERE,  {
+    return 42;
+});
+
+int result = handle.get(); // 阻塞直到任务完成
 ```
 
 ---
