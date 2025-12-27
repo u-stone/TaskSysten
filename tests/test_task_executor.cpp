@@ -246,6 +246,87 @@ TEST(TaskExecutorTest, WhenAny) {
     EXPECT_TRUE(any_done);
 }
 
+// Test 17: Return Value and Result Passing in .then()
+TEST(TaskExecutorTest, ReturnValuePassing) {
+    TaskExecutor executor;
+    
+    // Task returns an int, next task receives it and returns a string
+    auto h = executor.add_task(TASK_FROM_HERE, []() -> int {
+        return 42;
+    });
+
+    std::atomic<bool> finished{false};
+    std::string final_val;
+    std::mutex m;
+
+    h.then(TASK_FROM_HERE, [](int result) -> std::string {
+        return "Result: " + std::to_string(result);
+    }).then(TASK_FROM_HERE, [&](std::string s) {
+        std::lock_guard<std::mutex> lock(m);
+        final_val = s;
+        finished = true;
+    });
+
+    // Wait for chain completion
+    for(int i=0; i<100 && !finished; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    
+    EXPECT_TRUE(finished);
+    EXPECT_EQ(final_val, "Result: 42");
+}
+
+// Test 18: Priority Inheritance in .then()
+TEST(TaskExecutorTest, PriorityInheritanceInChain) {
+    // Use 1 thread to strictly control execution order
+    ThreadPoolConfig config;
+    config.min_threads = 1;
+    config.max_threads = 1;
+    TaskExecutor executor(config);
+
+    std::vector<std::string> order;
+    std::mutex m;
+
+    // 1. Block the pool
+    executor.add_task(TASK_FROM_HERE, []() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    });
+
+    // 2. Submit a HIGH priority chain
+    executor.add_task(TASK_FROM_HERE, TaskPriority::HIGH, []() { return "High"; })
+            .then(TASK_FROM_HERE, [&](const char* s) {
+                std::lock_guard<std::mutex> lock(m);
+                order.push_back(std::string(s) + "Cont");
+            });
+
+    // 3. Submit a LOW priority task
+    executor.add_task(TASK_FROM_HERE, TaskPriority::LOW, [&]() {
+        std::lock_guard<std::mutex> lock(m);
+        order.push_back("Low");
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    ASSERT_GE(order.size(), 2);
+    // HighCont should be before Low because it inherited HIGH priority from its parent
+    EXPECT_EQ(order[0], "HighCont");
+    EXPECT_EQ(order[1], "Low");
+}
+
+// Test 19: WhenAll with Mixed Return Types
+TEST(TaskExecutorTest, WhenAllMixedTypes) {
+    TaskExecutor executor;
+    auto h1 = executor.add_task(TASK_FROM_HERE, []() -> int { return 1; });
+    auto h2 = executor.add_task(TASK_FROM_HERE, []() -> std::string { return "2"; });
+
+    std::atomic<bool> done{false};
+    // TaskHandle<T> implicitly converts to TaskHandle<void> for when_all
+    executor.when_all(TASK_FROM_HERE, {h1, h2}).then(TASK_FROM_HERE, [&]() {
+        done = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_TRUE(done);
+}
+
 // Test 12: Chain on already finished task
 TEST(TaskExecutorTest, ChainOnFinishedTask) {
     TaskExecutor executor;
