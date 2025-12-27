@@ -106,6 +106,23 @@ void recovery_demo() {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 }
 
+void timeout_demo() {
+    LOG_INFO() << ">>> Starting Timeout Demo <<<";
+    TaskExecutor executor;
+
+    auto h = executor.add_task(TASK_FROM_HERE, []() {
+        LOG_INFO() << "Long task starting...";
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        LOG_INFO() << "Long task finished.";
+    }).timeout(TASK_FROM_HERE, std::chrono::milliseconds(200));
+
+    try {
+        h.get();
+    } catch (const std::exception& e) {
+        LOG_ERROR() << "Caught expected timeout: " << e.what();
+    }
+}
+
 int main() {
     LOG_INFO() << "Starting Task Engine Example with Dynamic Thread Pool...";
 
@@ -152,6 +169,8 @@ int main() {
     exception_demo();
 
     recovery_demo();
+
+    timeout_demo();
 
     stress_test();
 

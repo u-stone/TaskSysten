@@ -541,3 +541,29 @@ TEST(TaskExecutorTest, RecoverPassThrough) {
 
     EXPECT_EQ(h.get(), 100);
 }
+
+// Test 27: Task Timeout Triggered
+TEST(TaskExecutorTest, TaskTimeoutTriggered) {
+    TaskExecutor executor;
+    auto h = executor.add_task(TASK_FROM_HERE, []() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }).timeout(TASK_FROM_HERE, std::chrono::milliseconds(50));
+
+    try {
+        h.get();
+        FAIL() << "Should have thrown timeout exception";
+    } catch (const std::exception& e) {
+        EXPECT_STREQ(e.what(), "Task timed out");
+    }
+}
+
+// Test 28: Task Completes Before Timeout
+TEST(TaskExecutorTest, TaskCompletesBeforeTimeout) {
+    TaskExecutor executor;
+    auto h = executor.add_task(TASK_FROM_HERE, []() -> int {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        return 99;
+    }).timeout(TASK_FROM_HERE, std::chrono::milliseconds(200));
+
+    EXPECT_EQ(h.get(), 99);
+}

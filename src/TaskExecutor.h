@@ -132,6 +132,9 @@ public:
     template <typename Func>
     TaskHandle<T> recover(const Location& location, Func&& f);
 
+    // Set a timeout for the task. If it expires, the handle will carry a timeout exception.
+    TaskHandle<T> timeout(const Location& location, std::chrono::milliseconds duration);
+
     // Synchronously wait for the task to complete
     void wait() const;
 
@@ -447,6 +450,60 @@ T TaskHandle<T>::get() {
         }
         return std::move(*(node_->result));
     }
+}
+
+template <typename T>
+TaskHandle<T> TaskHandle<T>::timeout(const Location& location, std::chrono::milliseconds duration) {
+    if (!exec_) return TaskHandle<T>();
+
+    auto original_node = node_;
+    auto original_id = id_;
+    auto executor = exec_;
+
+    // Create a new node for the timed result using submit_deferred to get a valid ID
+    auto [timeout_handle, _] = exec_->template submit_deferred<T>(nullptr, nullptr, location.file_, location.line_, this->priority_);
+    auto timeout_node = timeout_handle.node_;
+
+    // Timer thread (Watchdog)
+    // In a production system, a centralized TimerManager would be more efficient than one thread per timeout.
+    std::thread([timeout_node, executor, original_id, duration]() {
+        std::this_thread::sleep_for(duration);
+        bool should_trigger = false;
+        {
+            std::lock_guard<std::mutex> lock(timeout_node->mutex);
+            if (timeout_node->is_finished) return;
+            timeout_node->exception = std::make_exception_ptr(std::runtime_error("Task timed out"));
+            should_trigger = true;
+        }
+        if (should_trigger) {
+            // Try to cancel the original task to save resources
+            executor->cancel_task(original_id);
+            timeout_node->run_continuations();
+        }
+    }).detach();
+
+    // Original task completion continuation
+    node_->add_continuation([original_node, timeout_node]() {
+        bool should_trigger = false;
+        {
+            std::lock_guard<std::mutex> lock(timeout_node->mutex);
+            if (timeout_node->is_finished) return; // Already timed out
+
+            std::lock_guard<std::mutex> lock_orig(original_node->mutex);
+            timeout_node->exception = original_node->exception;
+            if constexpr (!std::is_void_v<T>) {
+                if (original_node->result.has_value()) {
+                    timeout_node->result = std::move(original_node->result);
+                }
+            }
+            should_trigger = true;
+        }
+        if (should_trigger) {
+            timeout_node->run_continuations();
+        }
+    });
+
+    return timeout_handle;
 }
 
 } // namespace task_engine
