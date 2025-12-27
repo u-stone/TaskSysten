@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 #include <type_traits>
@@ -25,6 +26,7 @@ class TaskExecutor; // Forward declaration
  */
 struct TaskNodeBase {
     std::mutex mutex;
+    std::condition_variable cv;
     bool is_finished = false;
     std::vector<std::function<void()>> continuations;
     std::exception_ptr exception;
@@ -38,6 +40,7 @@ struct TaskNodeBase {
             is_finished = true;
             pending = std::move(continuations);
         }
+        cv.notify_all();
         for (auto& task : pending) {
             task();
         }
@@ -124,6 +127,12 @@ public:
     // Catch and handle exceptions from upstream
     template <typename Func>
     TaskHandle<void> on_error(const Location& location, Func&& f);
+
+    // Synchronously wait for the task to complete
+    void wait() const;
+
+    // Synchronously wait and return the result (or throw exception)
+    T get();
 
 private:
     friend class TaskExecutor;
@@ -384,6 +393,28 @@ TaskHandle<void> TaskHandle<T>::on_error(const Location& location, Func&& f) {
         node_->add_continuation(std::move(submit_fn));
     }
     return handle;
+}
+
+template <typename T>
+void TaskHandle<T>::wait() const {
+    if (!node_) return;
+    std::unique_lock<std::mutex> lock(node_->mutex);
+    node_->cv.wait(lock, [this] { return node_->is_finished; });
+}
+
+template <typename T>
+T TaskHandle<T>::get() {
+    wait();
+    if (node_->exception) {
+        std::rethrow_exception(node_->exception);
+    }
+    if constexpr (!std::is_void_v<T>) {
+        std::lock_guard<std::mutex> lock(node_->mutex);
+        if (!node_->result.has_value()) {
+            throw std::runtime_error("Task result already consumed or not set");
+        }
+        return std::move(*(node_->result));
+    }
 }
 
 } // namespace task_engine
