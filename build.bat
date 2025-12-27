@@ -34,6 +34,11 @@ echo [INFO] Building examples...
 cmake --build . --target example --config Debug
 if %errorlevel% neq 0 goto :error
 
+:: 编译 Benchmark 代码
+echo [INFO] Building benchmarks...
+cmake --build . --target benchmark --config Debug
+if %errorlevel% neq 0 goto :error
+
 :: 4. 运行单元测试
 echo [INFO] Running Unit Tests...
 :: -C Debug 指定配置，--output-on-failure 在失败时输出详细信息
@@ -49,6 +54,16 @@ if exist "Debug\example.exe" (
     "examples\Debug\example.exe"
 ) else (
     echo [WARN] Example executable not found in expected paths.
+)
+
+:: 6. 运行 Benchmark 程序
+echo [INFO] Running Benchmark...
+if exist "Debug\benchmark.exe" (
+    "Debug\benchmark.exe"
+) else if exist "benchmarks\Debug\benchmark.exe" (
+    "benchmarks\Debug\benchmark.exe"
+) else (
+    echo [WARN] Benchmark executable not found in expected paths.
 )
 
 echo ==========================================

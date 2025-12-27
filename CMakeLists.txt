@@ -22,6 +22,10 @@ target_link_libraries(task_engine PRIVATE Threads::Threads)
 add_executable(example examples/main.cpp)
 target_link_libraries(example PRIVATE task_engine)
 
+# --- Benchmarks ---
+add_executable(benchmark benchmarks/benchmark_main.cpp)
+target_link_libraries(benchmark PRIVATE task_engine)
+
 # --- Testing ---
 enable_testing()
 

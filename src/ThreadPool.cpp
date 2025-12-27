@@ -53,12 +53,14 @@ void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
 
     // Optimization: If submitted from within a worker thread, push to its local queue to bypass the global lock.
     // Only for NORMAL priority to avoid priority inversion (Global queue is checked first) and to ensure HIGH priority tasks are globally visible immediately.
-    if (priority == TaskPriority::NORMAL && t_worker_id != -1 && static_cast<size_t>(t_worker_id) < local_queues_.size()) {
+    if (config_.enable_task_stealing && priority == TaskPriority::NORMAL && t_worker_id != -1 && static_cast<size_t>(t_worker_id) < local_queues_.size()) {
         auto& lq = local_queues_[t_worker_id];
         {
             std::lock_guard<std::mutex> l_lock(lq->mutex);
             lq->queue.emplace_back(std::move(task), now, priority);
-            LOG_DEBUG() << "[Worker " << t_worker_id << "] Pushed task to Local Queue (Optimization)";
+            if (config_.enable_stealing_logs) {
+                LOG_DEBUG() << "[Worker " << t_worker_id << "] Pushed task to Local Queue (Optimization)";
+            }
         }
         condition_.notify_one();
         return;
@@ -70,7 +72,9 @@ void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
 
         tasks_queue_.emplace_back(std::move(task), now, priority); // Add the task to the queue with timestamp
         std::push_heap(tasks_queue_.begin(), tasks_queue_.end());
-        LOG_DEBUG() << "Task submitted to Global Queue (Priority: " << static_cast<int>(priority) << ")";
+        if (config_.enable_stealing_logs) {
+            LOG_DEBUG() << "Task submitted to Global Queue (Priority: " << static_cast<int>(priority) << ")";
+        }
 
         // Dynamic sizing logic: Check latency of the oldest task
         if (current_threads_count_ < config_.max_threads) {
@@ -114,9 +118,12 @@ void ThreadPool::worker_thread(size_t id) {
                 if (stop_flag_.load(std::memory_order_relaxed) || !tasks_queue_.empty()) {
                     return true;
                 }
-                // Fix: Must hold local lock to check empty()
-                std::lock_guard<std::mutex> l_lock(local_queues_[id]->mutex);
-                return !local_queues_[id]->queue.empty();
+                if (config_.enable_task_stealing) {
+                    // Fix: Must hold local lock to check empty()
+                    std::lock_guard<std::mutex> l_lock(local_queues_[id]->mutex);
+                    return !local_queues_[id]->queue.empty();
+                }
+                return false;
             });
 
             // 1. Try to get task from global priority queue
@@ -124,32 +131,43 @@ void ThreadPool::worker_thread(size_t id) {
                 std::pop_heap(tasks_queue_.begin(), tasks_queue_.end());
                 task = std::move(tasks_queue_.back().task);
                 tasks_queue_.pop_back();
-                LOG_DEBUG() << "[Worker " << id << "] Fetched task from Global Queue";
+                if (config_.enable_stealing_logs) {
+                    LOG_DEBUG() << "[Worker " << id << "] Fetched task from Global Queue";
+                }
             } 
             // If stopping and no more global tasks, check local before exiting
             else if (stop_flag_.load(std::memory_order_relaxed)) {
-                std::lock_guard<std::mutex> l_lock(local_queues_[id]->mutex);
-                if (local_queues_[id]->queue.empty()) {
+                bool can_exit = true;
+                if (config_.enable_task_stealing) {
+                    std::lock_guard<std::mutex> l_lock(local_queues_[id]->mutex);
+                    if (!local_queues_[id]->queue.empty()) {
+                        can_exit = false;
+                    }
+                }
+                
+                if (can_exit) {
                     current_threads_count_--;
                     return;
                 }
-                // If local queue is not empty, continue to drain local tasks
+                // If local queue is not empty (and stealing is enabled), continue to drain local tasks
             }
         }
 
         // 2. If no global task, try local queue (LIFO)
-        if (!task) {
+        if (config_.enable_task_stealing && !task) {
             auto& lq = local_queues_[id];
             std::lock_guard<std::mutex> l_lock(lq->mutex);
             if (!lq->queue.empty()) {
                 task = std::move(lq->queue.back().task);
                 lq->queue.pop_back();
-                LOG_DEBUG() << "[Worker " << id << "] Fetched task from Local Queue";
+                if (config_.enable_stealing_logs) {
+                    LOG_DEBUG() << "[Worker " << id << "] Fetched task from Local Queue";
+                }
             }
         }
 
         // 3. If still no task, try to steal from others (FIFO)
-        if (!task) {
+        if (config_.enable_task_stealing && !task) {
             for (size_t i = 1; i < config_.max_threads; ++i) {
                 size_t victim_id = (id + i) % config_.max_threads;
                 auto& vq = local_queues_[victim_id];
@@ -157,7 +175,9 @@ void ThreadPool::worker_thread(size_t id) {
                 if (v_lock.owns_lock() && !vq->queue.empty()) {
                     task = std::move(vq->queue.front().task);
                     vq->queue.pop_front();
-                    LOG_INFO() << "[Worker " << id << "] STOLE task from Worker " << victim_id << "'s Local Queue";
+                    if (config_.enable_stealing_logs) {
+                        LOG_INFO() << "[Worker " << id << "] STOLE task from Worker " << victim_id << "'s Local Queue";
+                    }
                     break;
                 }
             }
