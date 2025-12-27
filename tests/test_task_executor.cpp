@@ -245,3 +245,103 @@ TEST(TaskExecutorTest, WhenAny) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Enough for first task, not second
     EXPECT_TRUE(any_done);
 }
+
+// Test 12: Chain on already finished task
+TEST(TaskExecutorTest, ChainOnFinishedTask) {
+    TaskExecutor executor;
+    std::atomic<bool> first_done{false};
+    std::atomic<bool> second_done{false};
+
+    auto h = executor.add_task(TASK_FROM_HERE, [&]() {
+        first_done = true;
+    });
+
+    // Wait for the first task to definitely finish
+    while (!first_done) { std::this_thread::yield(); }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    // Adding a continuation to a finished task should trigger it immediately (or via pool)
+    h.then(TASK_FROM_HERE, [&]() {
+        second_done = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_TRUE(second_done);
+}
+
+// Test 13: Rapid Shutdown
+TEST(TaskExecutorTest, RapidShutdown) {
+    // Test if destroying the executor while tasks are being submitted/executed causes issues
+    for (int i = 0; i < 5; ++i) {
+        {
+            TaskExecutor executor;
+            for (int j = 0; j < 100; ++j) {
+                executor.add_task(TASK_FROM_HERE, []() {
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                });
+            }
+            // Executor goes out of scope here, triggering ThreadPool join
+        }
+    }
+}
+
+// Test 14: Concurrent Cancellation Stress
+TEST(TaskExecutorTest, ConcurrentCancellationStress) {
+    TaskExecutor executor;
+    const int num_tasks = 50;
+    std::vector<TaskHandle> handles;
+
+    for (int i = 0; i < num_tasks; ++i) {
+        handles.push_back(executor.add_task(TASK_FROM_HERE, []() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }));
+    }
+
+    std::vector<std::thread> cancel_threads;
+    for (int i = 0; i < 10; ++i) {
+        cancel_threads.emplace_back([&]() {
+            for (auto& h : handles) {
+                executor.cancel_task(h.id());
+            }
+        });
+    }
+
+    for (auto& t : cancel_threads) t.join();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+}
+
+// Test 15: Recursive Task Submission (Task Stealing check)
+TEST(TaskExecutorTest, RecursiveSubmission) {
+    ThreadPoolConfig config;
+    config.min_threads = 2;
+    TaskExecutor executor(config);
+    std::atomic<int> total_executed{0};
+    const int depth = 10;
+
+    std::function<void(int)> submit_recursive;
+    submit_recursive = [&](int d) {
+        total_executed++;
+        if (d > 0) {
+            executor.add_task(TASK_FROM_HERE, submit_recursive, d - 1);
+        }
+    };
+
+    executor.add_task(TASK_FROM_HERE, submit_recursive, depth);
+    
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(total_executed, depth + 1);
+}
+
+// Test 16: WhenAll with Empty Handles
+TEST(TaskExecutorTest, WhenAllEmptyHandles) {
+    TaskExecutor executor;
+    std::atomic<bool> triggered{false};
+    
+    std::vector<TaskHandle> empty_handles;
+    executor.when_all(TASK_FROM_HERE, empty_handles).then(TASK_FROM_HERE, [&]() {
+        triggered = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_TRUE(triggered);
+}

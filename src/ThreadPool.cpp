@@ -44,23 +44,27 @@ ThreadPool::~ThreadPool() {
 }
 
 void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
-    {
-        std::unique_lock<std::mutex> lock(queue_mutex_);
-        if (stop_flag_) {
-            LOG_WARN() << "ThreadPool is stopping, rejecting task submission.";
-            return;
-        }
+    if (stop_flag_.load(std::memory_order_relaxed)) {
+        LOG_WARN() << "ThreadPool is stopping, rejecting task submission.";
+        return;
+    }
 
-        auto now = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
 
-        // If submitted from within a worker thread, push to its local queue to reduce contention
-        if (t_worker_id != -1 && static_cast<size_t>(t_worker_id) < local_queues_.size()) {
-            auto& lq = local_queues_[t_worker_id];
+    // Optimization: If submitted from within a worker thread, push to its local queue to bypass the global lock.
+    if (t_worker_id != -1 && static_cast<size_t>(t_worker_id) < local_queues_.size()) {
+        auto& lq = local_queues_[t_worker_id];
+        {
             std::lock_guard<std::mutex> l_lock(lq->mutex);
             lq->queue.emplace_back(std::move(task), now, priority);
-            condition_.notify_one();
-            return;
         }
+        condition_.notify_one();
+        return;
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(queue_mutex_);
+        if (stop_flag_.load(std::memory_order_relaxed)) return;
 
         tasks_queue_.emplace_back(std::move(task), now, priority); // Add the task to the queue with timestamp
         std::push_heap(tasks_queue_.begin(), tasks_queue_.end());
@@ -104,7 +108,12 @@ void ThreadPool::worker_thread(size_t id) {
             
             // Wait until there is a task or the stop flag is set
             condition_.wait(lock, [this, id] {
-                return stop_flag_ || !tasks_queue_.empty() || !local_queues_[id]->queue.empty();
+                if (stop_flag_.load(std::memory_order_relaxed) || !tasks_queue_.empty()) {
+                    return true;
+                }
+                // Fix: Must hold local lock to check empty()
+                std::lock_guard<std::mutex> l_lock(local_queues_[id]->mutex);
+                return !local_queues_[id]->queue.empty();
             });
 
             // 1. Try to get task from global priority queue
@@ -114,12 +123,13 @@ void ThreadPool::worker_thread(size_t id) {
                 tasks_queue_.pop_back();
             } 
             // If stopping and no more global tasks, check local before exiting
-            else if (stop_flag_) {
+            else if (stop_flag_.load(std::memory_order_relaxed)) {
                 std::lock_guard<std::mutex> l_lock(local_queues_[id]->mutex);
                 if (local_queues_[id]->queue.empty()) {
                     current_threads_count_--;
                     return;
                 }
+                // If local queue is not empty, continue to drain local tasks
             }
         }
 
