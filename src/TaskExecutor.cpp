@@ -14,17 +14,14 @@ TaskExecutor::TaskExecutor(const ThreadPoolConfig& config)
 }
 
 TaskExecutor::~TaskExecutor() {
+    accepting_tasks_ = false;
     LOG_INFO() << "TaskExecutor shutting down...";
     // The unique_ptr to ThreadPool will automatically call its destructor,
     // which handles stopping and joining threads.
 }
 
-TaskHandle TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
-    TaskID id = next_task_id_++;
-    auto node = std::make_shared<TaskNode>();
-    
-    // Create a wrapper lambda that includes cancellation logic and task/callback execution
-    auto wrapped_task_for_pool = [this, id, node, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
+std::function<void()> TaskExecutor::create_task_wrapper(TaskID id, std::shared_ptr<TaskNode> node, std::function<void()> task, std::function<void()> callback, const char* file, int line) {
+    return [this, id, node, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
         // Check for cancellation
         bool is_cancelled = false;
         {
@@ -67,49 +64,28 @@ TaskHandle TaskExecutor::submit_internal(std::function<void()> task, std::functi
         // Trigger continuations
         node->run_continuations();
     };
+}
+
+TaskHandle TaskExecutor::submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
+    if (!accepting_tasks_) return {};
+
+    TaskID id = next_task_id_++;
+    auto node = std::make_shared<TaskNode>();
+    auto wrapped = create_task_wrapper(id, node, std::move(task), std::move(callback), file, line);
 
     // Submit the wrapped task to the underlying thread pool
-    thread_pool_->submit(std::move(wrapped_task_for_pool), priority);
+    thread_pool_->submit(std::move(wrapped), priority);
     return TaskHandle(id, node, this);
 }
 
 std::pair<TaskHandle, std::function<void()>> TaskExecutor::submit_deferred(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
+    if (!accepting_tasks_) return {{}, nullptr};
+
     TaskID id = next_task_id_++;
     auto node = std::make_shared<TaskNode>();
+    auto wrapped = create_task_wrapper(id, node, std::move(task), std::move(callback), file, line);
 
-    auto wrapped_task_for_pool = [this, id, node, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
-        bool is_cancelled = false;
-        {
-            std::lock_guard<std::mutex> lock(status_mutex_);
-            auto it = cancelled_tasks_.find(id);
-            if (it != cancelled_tasks_.end()) {
-                is_cancelled = true;
-                cancelled_tasks_.erase(it);
-            }
-        }
-
-        if (!is_cancelled) {
-            if (task) {
-                try {
-                    auto start_time = std::chrono::steady_clock::now();
-                    task();
-                    auto end_time = std::chrono::steady_clock::now();
-                    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-                    if (duration_ms > 500) {
-                        LOG_WARN() << "Task " << id << " (" << file << ":" << line << ") execution time " << duration_ms << "ms exceeded 500ms threshold";
-                    }
-                } catch (const std::exception& e) {
-                    LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw exception: " << e.what();
-                } catch (...) {
-                    LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw unknown exception.";
-                }
-            }
-            if (callback) callback();
-            node->run_continuations();
-        }
-    };
-
-    auto submit_fn = [this, wrapped = std::move(wrapped_task_for_pool), priority]() mutable {
+    auto submit_fn = [this, wrapped = std::move(wrapped), priority]() mutable {
         thread_pool_->submit(std::move(wrapped), priority);
     };
 

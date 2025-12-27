@@ -187,11 +187,15 @@ private:
     // Internal submission logic
     TaskHandle submit_internal(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority);
 
+    // Common wrapper for task execution logic
+    std::function<void()> create_task_wrapper(TaskID id, std::shared_ptr<TaskNode> node, std::function<void()> task, std::function<void()> callback, const char* file, int line);
+
     // Helper to create a task but not submit it immediately (for .then())
     std::pair<TaskHandle, std::function<void()>> submit_deferred(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority);
 
     // Task Management
     std::atomic<TaskID> next_task_id_;
+    std::atomic<bool> accepting_tasks_{true};
     std::mutex status_mutex_;
     std::unordered_map<TaskID, bool> cancelled_tasks_; // Tracks cancelled IDs
 

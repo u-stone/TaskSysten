@@ -37,6 +37,11 @@ ThreadPool::~ThreadPool() {
 void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
     {
         std::unique_lock<std::mutex> lock(queue_mutex_);
+        if (stop_flag_) {
+            LOG_WARN() << "ThreadPool is stopping, rejecting task submission.";
+            return;
+        }
+
         auto now = std::chrono::steady_clock::now();
         tasks_queue_.push_back({std::move(task), now, priority}); // Add the task to the queue with timestamp
         std::push_heap(tasks_queue_.begin(), tasks_queue_.end());
