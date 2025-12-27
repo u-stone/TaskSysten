@@ -14,6 +14,7 @@
 #include <optional>
 
 #include "ThreadPool.h" // Include the new ThreadPool header
+#include "Logger.h" // Required for LOG_WARN, LOG_ERROR macros
 namespace task_engine {
 
 class TaskExecutor; // Forward declaration
@@ -79,6 +80,18 @@ struct Location {
     Location() = default;
 };
 
+namespace detail {
+    template <typename T, typename Func, typename... Args>
+    struct GetResultType {
+        using type = std::invoke_result_t<Func, T, Args...>;
+    };
+
+    template <typename Func, typename... Args>
+    struct GetResultType<void, Func, Args...> {
+        using type = std::invoke_result_t<Func, Args...>;
+    };
+}
+
 /**
  * @brief A handle to a submitted task, allowing for chaining via .then().
  */
@@ -101,15 +114,15 @@ public:
 
     // Chain a new task to run after this one completes
     template <typename Func, typename... Args>
-    TaskHandle then(const Location& location, TaskPriority priority, Func&& f, Args&&... args);
+    auto then(const Location& location, TaskPriority priority, Func&& f, Args&&... args);
 
     template <typename Func, typename... Args, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Func>, TaskPriority>>>
-    TaskHandle then(const Location& location, Func&& f, Args&&... args);
+    auto then(const Location& location, Func&& f, Args&&... args);
 
 private:
     friend class TaskExecutor;
     size_t id_ = 0;
-    std::shared_ptr<TaskNode> node_;
+    std::shared_ptr<NodeType> node_;
     TaskExecutor* exec_ = nullptr;
     TaskPriority priority_ = TaskPriority::NORMAL;
 };
@@ -147,9 +160,13 @@ public:
      */
     template <typename Func, typename... Args>
     auto add_task(const Location& location, TaskPriority priority, Func&& f, Args&&... args) {
+        // Explicitly cast std::bind result to std::function for C++17 compatibility with MSVC
         using ReturnType = std::invoke_result_t<Func, Args...>;
-        return submit_internal<ReturnType>([f = std::forward<Func>(f), ...args = std::forward<Args>(args)...]() mutable {
-            return f(std::move(args)...);
+        std::function<ReturnType()> bound_task = static_cast<std::function<ReturnType()>>(
+            std::bind(std::forward<Func>(f), std::forward<Args>(args)...)
+        );
+        return submit_internal<ReturnType>([bound_task = std::move(bound_task)]() mutable -> ReturnType {
+            return bound_task();
         }, nullptr, location.file_, location.line_, priority);
     }
 
@@ -170,9 +187,13 @@ public:
      */
     template <typename Func, typename Callback>
     auto add_task_with_callback(const Location& location, TaskPriority priority, Func&& f, Callback&& cb) {
+        // Explicitly cast std::bind result to std::function for C++17 compatibility with MSVC
         using ReturnType = std::invoke_result_t<Func>;
-        return submit_internal<ReturnType>([f = std::forward<Func>(f)]() mutable {
-            return f();
+        std::function<ReturnType()> bound_task = static_cast<std::function<ReturnType()>>(
+            std::bind(std::forward<Func>(f))
+        );
+        return submit_internal<ReturnType>([bound_task = std::move(bound_task)]() mutable -> ReturnType {
+            return bound_task();
         }, std::forward<Callback>(cb), location.file_, location.line_, priority);
     }
 
@@ -205,7 +226,7 @@ public:
     size_t get_worker_count() const;
 
 private:
-    friend class TaskHandle;
+    template <typename T> friend class TaskHandle;
 
     // Internal submission logic
     template <typename T>
@@ -290,22 +311,32 @@ private:
 template <typename T>
 template <typename Func, typename... Args>
 auto TaskHandle<T>::then(const Location& location, TaskPriority priority, Func&& f, Args&&... args) {
-    if (!exec_) return {};
+    using ResultType = typename detail::GetResultType<T, Func, Args...>::type;
 
-    using ResultType = std::conditional_t<std::is_void_v<T>, 
-                        std::invoke_result_t<Func, Args...>, 
-                        std::invoke_result_t<Func, T, Args...>>;
+    if (!exec_) return TaskHandle<ResultType>();
 
     auto prev_node = node_;
-    auto deferred_task = [prev_node, f = std::forward<Func>(f), ...args = std::forward<Args>(args)...]() mutable {
-        if constexpr (std::is_void_v<T>) {
-            return f(std::move(args)...);
-        } else {
-            return f(std::move(*(prev_node->result)), std::move(args)...);
-        }
-    };
+    std::function<ResultType()> final_task_func;
 
-    auto [handle, submit_fn] = exec_->template submit_deferred<ResultType>(std::move(deferred_task), nullptr, location.file_, location.line_, priority);
+    if constexpr (std::is_void_v<T>) {
+        // Case 1: Previous task returned void.
+        std::function<ResultType()> bound_f = static_cast<std::function<ResultType()>>(
+            std::bind(std::forward<Func>(f), std::forward<Args>(args)...)
+        );
+        final_task_func = [prev_node, bound_f = std::move(bound_f)]() mutable -> ResultType {
+            return bound_f();
+        };
+    } else {
+        // Case 2: Previous task returned T.
+        std::function<ResultType(T)> bound_f = static_cast<std::function<ResultType(T)>>(
+            std::bind(std::forward<Func>(f), std::placeholders::_1, std::forward<Args>(args)...)
+        );
+        final_task_func = [prev_node, bound_f = std::move(bound_f)]() mutable -> ResultType {
+            return bound_f(std::move(*(prev_node->result)));
+        };
+    }
+
+    auto [handle, submit_fn] = exec_->template submit_deferred<ResultType>(std::move(final_task_func), nullptr, location.file_, location.line_, priority);
 
     if (node_) {
         node_->add_continuation(std::move(submit_fn));

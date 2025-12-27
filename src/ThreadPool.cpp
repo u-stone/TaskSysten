@@ -52,7 +52,8 @@ void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
     auto now = std::chrono::steady_clock::now();
 
     // Optimization: If submitted from within a worker thread, push to its local queue to bypass the global lock.
-    if (t_worker_id != -1 && static_cast<size_t>(t_worker_id) < local_queues_.size()) {
+    // Only for NORMAL priority to avoid priority inversion (Global queue is checked first) and to ensure HIGH priority tasks are globally visible immediately.
+    if (priority == TaskPriority::NORMAL && t_worker_id != -1 && static_cast<size_t>(t_worker_id) < local_queues_.size()) {
         auto& lq = local_queues_[t_worker_id];
         {
             std::lock_guard<std::mutex> l_lock(lq->mutex);
