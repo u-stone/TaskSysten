@@ -59,9 +59,9 @@ TEST(TimerManagerTest, MultipleTimersOrder) {
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
     ASSERT_EQ(results.size(), 3);
-    EXPECT_EQ(results[0], 1); // 50ms 的最先执行
-    EXPECT_EQ(results[1], 2); // 100ms 的其次
-    EXPECT_EQ(results[2], 3); // 150ms 的最后
+    EXPECT_EQ(results[0], 1); // 50ms executes first
+    EXPECT_EQ(results[1], 2); // 100ms executes second
+    EXPECT_EQ(results[2], 3); // 150ms executes last
 }
 
 // Test 4: Timer does not fire early
