@@ -30,6 +30,7 @@ void run_comparison_benchmark() {
         config.strategy = ScalingStrategy::QUEUE_LENGTH;
         config.queue_length_threshold = 100;
         config.enable_task_stealing = enable_stealing;
+        config.enable_stealing_logs = false; // Ensure logs are disabled during benchmark
 
         TaskExecutor executor(config);
         std::atomic<int> counter{0};
