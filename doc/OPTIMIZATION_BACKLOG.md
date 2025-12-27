@@ -36,7 +36,8 @@ This document tracks pending optimizations, architectural considerations, and fe
 *   **Goal**: Provide comprehensive visibility into partial failures during parallel task execution.
 
 ### 3.3 Recovery for Aggregates
-*   **Description**: Allow `.recover()` to be applied to `when_all` or `when_any` results to provide a unified fallback for a group of tasks.
+*   **Description**: Extend `when_all` to support typed results (e.g., `TaskHandle<std::vector<T>>`) and allow `.recover()` to provide a unified fallback value for the entire collection if any sub-task fails. This ensures that a single failure doesn't invalidate the entire aggregate operation, allowing the system to return a default state for the group instead of propagating an exception.
+*   **Goal**: Enhance the resilience and data-flow capabilities of aggregate task operations.
 
 ## 4. Observability & Tooling
 
