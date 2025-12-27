@@ -207,7 +207,7 @@ TEST(TaskExecutorTest, WhenAll) {
     TaskExecutor executor(config);
 
     std::atomic<int> counter{0};
-    std::vector<TaskHandle> handles;
+    std::vector<TaskHandle<void>> handles;
 
     for (int i = 0; i < 5; ++i) {
         handles.push_back(executor.add_task(TASK_FROM_HERE, [&]() {
@@ -233,7 +233,7 @@ TEST(TaskExecutorTest, WhenAny) {
     config.max_threads = 4;
     TaskExecutor executor(config);
 
-    std::vector<TaskHandle> handles;
+    std::vector<TaskHandle<void>> handles;
     handles.push_back(executor.add_task(TASK_FROM_HERE, []() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); }));
     handles.push_back(executor.add_task(TASK_FROM_HERE, []() { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }));
 
@@ -370,7 +370,7 @@ TEST(TaskExecutorTest, RapidShutdown) {
 TEST(TaskExecutorTest, ConcurrentCancellationStress) {
     TaskExecutor executor;
     const int num_tasks = 50;
-    std::vector<TaskHandle> handles;
+    std::vector<TaskHandle<void>> handles;
 
     for (int i = 0; i < num_tasks; ++i) {
         handles.push_back(executor.add_task(TASK_FROM_HERE, []() {
@@ -418,7 +418,7 @@ TEST(TaskExecutorTest, WhenAllEmptyHandles) {
     TaskExecutor executor;
     std::atomic<bool> triggered{false};
     
-    std::vector<TaskHandle> empty_handles;
+    std::vector<TaskHandle<void>> empty_handles;
     executor.when_all(TASK_FROM_HERE, empty_handles).then(TASK_FROM_HERE, [&]() {
         triggered = true;
     });
