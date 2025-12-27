@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm> // For std::max
 #include <chrono>
+#include <deque>
 
 namespace task_engine {
 
@@ -69,12 +70,17 @@ public:
 
 private:
     // Worker thread loop function
-    void worker_thread();
+    void worker_thread(size_t id);
 
     struct TaskEntry {
         std::function<void()> task;
         std::chrono::steady_clock::time_point enqueue_time;
         TaskPriority priority;
+
+        // Default constructor for deque
+        TaskEntry() : task(nullptr), priority(TaskPriority::NORMAL) {}
+        TaskEntry(std::function<void()> t, std::chrono::steady_clock::time_point time, TaskPriority p)
+            : task(std::move(t)), enqueue_time(time), priority(p) {}
 
         // Max heap: largest element at top.
         bool operator<(const TaskEntry& other) const {
@@ -85,9 +91,15 @@ private:
         }
     };
 
+    struct LocalQueue {
+        std::deque<TaskEntry> queue;
+        std::mutex mutex;
+    };
+
     std::vector<std::thread> threads_; // Collection of worker threads
     std::vector<TaskEntry> tasks_queue_; // Priority Queue of tasks to be executed (using heap)
-
+    std::vector<std::unique_ptr<LocalQueue>> local_queues_; // Per-thread local queues
+    
     std::mutex queue_mutex_; // Mutex to protect the task queue
     std::condition_variable condition_; // Condition variable to signal workers
     bool stop_flag_; // Protected by queue_mutex_
