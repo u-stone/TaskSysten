@@ -58,6 +58,7 @@ void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
         {
             std::lock_guard<std::mutex> l_lock(lq->mutex);
             lq->queue.emplace_back(std::move(task), now, priority);
+            LOG_DEBUG() << "[Worker " << t_worker_id << "] Pushed task to Local Queue (Optimization)";
         }
         condition_.notify_one();
         return;
@@ -69,6 +70,7 @@ void ThreadPool::submit(std::function<void()> task, TaskPriority priority) {
 
         tasks_queue_.emplace_back(std::move(task), now, priority); // Add the task to the queue with timestamp
         std::push_heap(tasks_queue_.begin(), tasks_queue_.end());
+        LOG_DEBUG() << "Task submitted to Global Queue (Priority: " << static_cast<int>(priority) << ")";
 
         // Dynamic sizing logic: Check latency of the oldest task
         if (current_threads_count_ < config_.max_threads) {
@@ -122,6 +124,7 @@ void ThreadPool::worker_thread(size_t id) {
                 std::pop_heap(tasks_queue_.begin(), tasks_queue_.end());
                 task = std::move(tasks_queue_.back().task);
                 tasks_queue_.pop_back();
+                LOG_DEBUG() << "[Worker " << id << "] Fetched task from Global Queue";
             } 
             // If stopping and no more global tasks, check local before exiting
             else if (stop_flag_.load(std::memory_order_relaxed)) {
@@ -141,6 +144,7 @@ void ThreadPool::worker_thread(size_t id) {
             if (!lq->queue.empty()) {
                 task = std::move(lq->queue.back().task);
                 lq->queue.pop_back();
+                LOG_DEBUG() << "[Worker " << id << "] Fetched task from Local Queue";
             }
         }
 
@@ -153,6 +157,7 @@ void ThreadPool::worker_thread(size_t id) {
                 if (v_lock.owns_lock() && !vq->queue.empty()) {
                     task = std::move(vq->queue.front().task);
                     vq->queue.pop_front();
+                    LOG_INFO() << "[Worker " << id << "] STOLE task from Worker " << victim_id << "'s Local Queue";
                     break;
                 }
             }
