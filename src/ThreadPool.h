@@ -31,6 +31,8 @@ struct ThreadPoolConfig {
     size_t queue_length_threshold = 10;
     size_t max_wait_time_ms = 100;
     size_t cooldown_ms = 200;
+    bool enable_task_stealing = true;
+    bool enable_stealing_logs = false;
 };
 
 /**

@@ -12,47 +12,6 @@ void simple_function(int id) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Simulate some work
 }
 
-void stress_test() {
-    LOG_INFO() << ">>> Starting Stress Test <<<";
-
-    ThreadPoolConfig config;
-    config.min_threads = 4;
-    config.max_threads = 16;
-    config.strategy = ScalingStrategy::QUEUE_LENGTH;
-    config.queue_length_threshold = 100;
-
-    TaskExecutor executor(config);
-    std::atomic<int> counter{0};
-    const int num_tasks = 10000;
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 5); // Random delay between 0ms and 5ms
-
-    auto start = std::chrono::steady_clock::now();
-
-    for (int i = 0; i < num_tasks; ++i) {
-        int sleep_ms = dis(gen);
-        executor.add_task(TASK_FROM_HERE, [&counter, sleep_ms]() {
-            if (sleep_ms > 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
-            }
-            counter++;
-        });
-    }
-
-    // Wait for completion
-    while (counter < num_tasks) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    auto end = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-
-    LOG_INFO() << "Stress Test Completed: " << counter << "/" << num_tasks << " tasks finished in " << duration << "ms";
-    LOG_INFO() << "Peak Worker Threads: " << executor.get_worker_count();
-}
-
 void exception_demo() {
     LOG_INFO() << ">>> Starting Exception Propagation Demo <<<";
     TaskExecutor executor;
@@ -171,8 +130,6 @@ int main() {
     recovery_demo();
 
     timeout_demo();
-
-    stress_test();
 
     LOG_INFO() << "Shutting down...";
     // Destructor will handle cleanup
