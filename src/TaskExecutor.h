@@ -128,6 +128,10 @@ public:
     template <typename Func>
     TaskHandle<void> on_error(const Location& location, Func&& f);
 
+    // Recover from an exception by providing a fallback value or logic
+    template <typename Func>
+    TaskHandle<T> recover(const Location& location, Func&& f);
+
     // Synchronously wait for the task to complete
     void wait() const;
 
@@ -388,6 +392,34 @@ TaskHandle<void> TaskHandle<T>::on_error(const Location& location, Func&& f) {
     };
 
     auto [handle, submit_fn] = exec_->template submit_deferred<void>(std::move(deferred_task), nullptr, location.file_, location.line_, this->priority_);
+
+    if (node_) {
+        node_->add_continuation(std::move(submit_fn));
+    }
+    return handle;
+}
+
+template <typename T>
+template <typename Func>
+TaskHandle<T> TaskHandle<T>::recover(const Location& location, Func&& f) {
+    if (!exec_) return TaskHandle<T>();
+
+    auto prev_node = node_;
+    auto deferred_task = [prev_node, f = std::forward<Func>(f)]() mutable -> T {
+        if (prev_node && prev_node->exception) {
+            if constexpr (std::is_void_v<T>) {
+                f(prev_node->exception);
+                return;
+            } else {
+                return f(prev_node->exception);
+            }
+        }
+        if constexpr (!std::is_void_v<T>) {
+            return std::move(*(prev_node->result));
+        }
+    };
+
+    auto [handle, submit_fn] = exec_->template submit_deferred<T>(std::move(deferred_task), nullptr, location.file_, location.line_, this->priority_);
 
     if (node_) {
         node_->add_continuation(std::move(submit_fn));
