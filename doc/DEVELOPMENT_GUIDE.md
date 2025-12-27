@@ -65,6 +65,8 @@
     *   **类型推导**: `.then()` 方法利用 `std::invoke_result_t` 自动推导后续任务的参数类型，实现类型安全的链式调用。
     *   **数据传递**: 内部使用 `std::optional<T>` 存储结果，并通过 `std::move` 高效传递给后续任务。
     *   **优先级继承**: 子任务默认继承父任务的优先级，保持调度一致性。
+    *   **异构聚合**: `TaskHandle<T>` 支持隐式转换为 `TaskHandle<void>`，使得 `when_all` 和 `when_any` 能够聚合不同返回类型的任务。
+    *   **C++17 兼容性**: 针对 MSVC 编译器在 C++17 标准下的限制（如 lambda init-capture 包展开问题），采用了 `std::bind` 配合显式 `std::function` 类型转换的策略，确保了泛型任务链的跨平台兼容性。
 
 ---
 
