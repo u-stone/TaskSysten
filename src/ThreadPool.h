@@ -90,7 +90,7 @@ private:
 
     std::mutex queue_mutex_; // Mutex to protect the task queue
     std::condition_variable condition_; // Condition variable to signal workers
-    std::atomic<bool> stop_flag_; // Flag to signal threads to stop
+    bool stop_flag_; // Protected by queue_mutex_
 
     ThreadPoolConfig config_; // Configuration
     std::atomic<size_t> current_threads_count_; // Tracks the actual number of running threads
