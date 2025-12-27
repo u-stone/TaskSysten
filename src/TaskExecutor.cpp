@@ -8,7 +8,8 @@ namespace task_engine {
  
 TaskExecutor::TaskExecutor(const ThreadPoolConfig& config)
     : next_task_id_(1),
-      thread_pool_(std::make_unique<ThreadPool>(config))
+      thread_pool_(std::make_unique<ThreadPool>(config)),
+      timer_manager_(std::make_unique<TimerManager>())
 {
     // The ThreadPool constructor handles its own thread initialization.
 }

@@ -13,6 +13,7 @@ add_library(task_engine
     src/TaskExecutor.cpp
     src/ThreadPool.cpp
     src/Logger.cpp
+    src/TimerManager.cpp
 )
 target_include_directories(task_engine PUBLIC src)
 target_link_libraries(task_engine PRIVATE Threads::Threads)
@@ -35,7 +36,11 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(unit_tests tests/test_task_executor.cpp)
+add_executable(unit_tests 
+    tests/test_task_executor.cpp 
+    tests/test_thread_pool.cpp
+    tests/test_timer_manager.cpp
+)
 target_link_libraries(unit_tests PRIVATE task_engine GTest::gtest_main)
 
 include(GoogleTest)

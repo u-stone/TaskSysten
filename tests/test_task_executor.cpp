@@ -83,47 +83,6 @@ TEST(TaskExecutorTest, Cancellation) {
     EXPECT_FALSE(executed) << "Task should have been cancelled and not executed.";
 }
 
-// Test 5: Multiple Threads
-TEST(TaskExecutorTest, HighLoad) {
-    ThreadPoolConfig config;
-    config.min_threads = 2;
-    config.max_threads = 8;
-    config.max_wait_time_ms = 50;
-    TaskExecutor executor(config);
-    std::atomic<int> counter{0};
-    const int num_tasks = 100;
-
-    for(int i=0; i<num_tasks; ++i) {
-        executor.add_task(TASK_FROM_HERE, [&]() {
-            counter++;
-        });
-    }
-
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    EXPECT_EQ(counter, num_tasks);
-}
-
-// Test 6: Dynamic Thread Growth (basic check)
-TEST(TaskExecutorTest, DynamicGrowth) {
-    // Start with 1 thread, max 4, grow if wait time > 1ms
-    ThreadPoolConfig config;
-    config.min_threads = 1;
-    config.max_threads = 4;
-    config.max_wait_time_ms = 1;
-    TaskExecutor executor(config);
-    std::atomic<int> counter{0};
-    const int num_tasks = 10;
-
-    for(int i=0; i<num_tasks; ++i) {
-        executor.add_task(TASK_FROM_HERE, [&]() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); counter++; });
-    }
-    
-    std::this_thread::sleep_for(std::chrono::seconds(1)); // Give time for threads to potentially spawn and tasks to complete
-    EXPECT_GE(executor.get_worker_count(), 1); // At least min_threads
-    EXPECT_LE(executor.get_worker_count(), 4); // Not more than max_threads
-    EXPECT_EQ(counter, num_tasks); // All tasks should eventually complete
-}
-
 // Test 7: Exception Logging with Source Location
 TEST(TaskExecutorTest, ExceptionLoggingWithLocation) {
     ThreadPoolConfig config;
@@ -137,42 +96,6 @@ TEST(TaskExecutorTest, ExceptionLoggingWithLocation) {
     });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-}
-
-// Test 8: Priority Execution
-TEST(TaskExecutorTest, PriorityExecution) {
-    // 1 thread to ensure serialization and order check
-    ThreadPoolConfig config;
-    config.min_threads = 1;
-    config.max_threads = 1;
-    TaskExecutor executor(config);
-
-    std::vector<int> execution_order;
-    std::mutex mutex;
-
-    // Block the thread first
-    executor.add_task(TASK_FROM_HERE, []() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    });
-
-    // Add Low priority task
-    executor.add_task(TASK_FROM_HERE, TaskPriority::LOW, [&]() {
-        std::lock_guard<std::mutex> lock(mutex);
-        execution_order.push_back(0); // 0 for Low
-    });
-
-    // Add High priority task
-    executor.add_task(TASK_FROM_HERE, TaskPriority::HIGH, [&]() {
-        std::lock_guard<std::mutex> lock(mutex);
-        execution_order.push_back(2); // 2 for High
-    });
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    
-    // Expect High (2) then Low (0) because the thread was blocked when they were added
-    ASSERT_EQ(execution_order.size(), 2);
-    EXPECT_EQ(execution_order[0], 2);
-    EXPECT_EQ(execution_order[1], 0);
 }
 
 // Test 9: Chain Execution (then)
@@ -413,22 +336,6 @@ TEST(TaskExecutorTest, ChainOnFinishedTask) {
     EXPECT_TRUE(second_done);
 }
 
-// Test 13: Rapid Shutdown
-TEST(TaskExecutorTest, RapidShutdown) {
-    // Test if destroying the executor while tasks are being submitted/executed causes issues
-    for (int i = 0; i < 5; ++i) {
-        {
-            TaskExecutor executor;
-            for (int j = 0; j < 100; ++j) {
-                executor.add_task(TASK_FROM_HERE, []() {
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
-                });
-            }
-            // Executor goes out of scope here, triggering ThreadPool join
-        }
-    }
-}
-
 // Test 14: Concurrent Cancellation Stress
 TEST(TaskExecutorTest, ConcurrentCancellationStress) {
     TaskExecutor executor;
@@ -452,28 +359,6 @@ TEST(TaskExecutorTest, ConcurrentCancellationStress) {
 
     for (auto& t : cancel_threads) t.join();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-}
-
-// Test 15: Recursive Task Submission (Task Stealing check)
-TEST(TaskExecutorTest, RecursiveSubmission) {
-    ThreadPoolConfig config;
-    config.min_threads = 2;
-    TaskExecutor executor(config);
-    std::atomic<int> total_executed{0};
-    const int depth = 10;
-
-    std::function<void(int)> submit_recursive;
-    submit_recursive = [&](int d) {
-        total_executed++;
-        if (d > 0) {
-            executor.add_task(TASK_FROM_HERE, submit_recursive, d - 1);
-        }
-    };
-
-    executor.add_task(TASK_FROM_HERE, submit_recursive, depth);
-    
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    EXPECT_EQ(total_executed, depth + 1);
 }
 
 // Test 16: WhenAll with Empty Handles
@@ -566,4 +451,122 @@ TEST(TaskExecutorTest, TaskCompletesBeforeTimeout) {
     }).timeout(TASK_FROM_HERE, std::chrono::milliseconds(200));
 
     EXPECT_EQ(h.get(), 99);
+}
+
+// Test 29: Long Chain Propagation
+TEST(TaskExecutorTest, LongChainExceptionPropagation) {
+    TaskExecutor executor;
+    std::atomic<int> execution_count{0};
+    std::atomic<bool> error_caught{false};
+
+    executor.add_task(TASK_FROM_HERE, [&]() {
+        execution_count++; // 1
+    }).then(TASK_FROM_HERE, [&]() {
+        execution_count++; // 2
+        throw std::runtime_error("Middle failure");
+    }).then(TASK_FROM_HERE, [&]() {
+        execution_count++; // Should be skipped
+    }).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        error_caught = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(execution_count, 2);
+    EXPECT_TRUE(error_caught);
+}
+
+// Test 30: Exception thrown inside on_error
+TEST(TaskExecutorTest, ExceptionInOnError) {
+    TaskExecutor executor;
+    std::atomic<bool> second_error_caught{false};
+
+    executor.add_task(TASK_FROM_HERE, []() {
+        throw std::runtime_error("First fail");
+    }).on_error(TASK_FROM_HERE, [](std::exception_ptr ex) {
+        throw std::runtime_error("Second fail");
+    }).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        try {
+            if (ex) std::rethrow_exception(ex);
+        } catch (const std::exception& e) {
+            if (std::string(e.what()) == "Second fail") {
+                second_error_caught = true;
+            }
+        }
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_TRUE(second_error_caught);
+}
+
+// Test 31: Exception thrown inside recover
+TEST(TaskExecutorTest, ExceptionInRecover) {
+    TaskExecutor executor;
+    std::atomic<bool> final_catch{false};
+
+    executor.add_task(TASK_FROM_HERE, []() -> int {
+        throw std::runtime_error("Initial fail");
+        return 0;
+    }).recover(TASK_FROM_HERE, [](std::exception_ptr ex) -> int {
+        throw std::runtime_error("Recover fail");
+        return -1;
+    }).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        final_catch = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_TRUE(final_catch);
+}
+
+// Test 32: on_error skipped on success
+TEST(TaskExecutorTest, OnErrorSkippedOnSuccess) {
+    TaskExecutor executor;
+    std::atomic<bool> error_run{false};
+    std::atomic<bool> then_run{false};
+
+    executor.add_task(TASK_FROM_HERE, []() {
+        return 1;
+    }).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        error_run = true;
+    }).then(TASK_FROM_HERE, [&]() {
+        then_run = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_FALSE(error_run);
+    EXPECT_TRUE(then_run);
+}
+
+// Test 33: when_all with multiple failures
+TEST(TaskExecutorTest, WhenAllMultipleFailures) {
+    TaskExecutor executor;
+    std::atomic<int> error_count{0};
+
+    auto h1 = executor.add_task(TASK_FROM_HERE, []() {
+        throw std::runtime_error("Fail A");
+    });
+    auto h2 = executor.add_task(TASK_FROM_HERE, []() {
+        throw std::runtime_error("Fail B");
+    });
+
+    executor.when_all(TASK_FROM_HERE, {h1, h2}).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        error_count++;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(error_count, 1);
+}
+
+// Test 34: Callback behavior on task failure
+TEST(TaskExecutorTest, CallbackOnFailure) {
+    TaskExecutor executor;
+    std::atomic<bool> callback_run{false};
+
+    executor.add_task_with_callback(TASK_FROM_HERE,
+        []() { throw std::runtime_error("Task failed"); },
+        [&]() { callback_run = true; }
+    );
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Based on create_task_wrapper implementation, if task throws, callback is skipped.
+    EXPECT_FALSE(callback_run);
 }

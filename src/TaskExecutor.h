@@ -17,6 +17,7 @@
 
 #include "ThreadPool.h" // Include the new ThreadPool header
 #include "Logger.h" // Required for LOG_WARN, LOG_ERROR macros
+#include "TimerManager.h"
 namespace task_engine {
 
 class TaskExecutor; // Forward declaration
@@ -322,6 +323,7 @@ private:
 
     // Task Management
     std::atomic<TaskID> next_task_id_;
+    std::unique_ptr<TimerManager> timer_manager_;
     std::atomic<bool> accepting_tasks_{true};
     std::mutex status_mutex_;
     std::unordered_map<TaskID, bool> cancelled_tasks_; // Tracks cancelled IDs
@@ -464,10 +466,8 @@ TaskHandle<T> TaskHandle<T>::timeout(const Location& location, std::chrono::mill
     auto [timeout_handle, _] = exec_->template submit_deferred<T>(nullptr, nullptr, location.file_, location.line_, this->priority_);
     auto timeout_node = timeout_handle.node_;
 
-    // Timer thread (Watchdog)
-    // In a production system, a centralized TimerManager would be more efficient than one thread per timeout.
-    std::thread([timeout_node, executor, original_id, duration]() {
-        std::this_thread::sleep_for(duration);
+    // Use the centralized TimerManager instead of a detached thread
+    auto timer_id = executor->timer_manager_->add_timer(duration, [timeout_node, executor, original_id]() {
         bool should_trigger = false;
         {
             std::lock_guard<std::mutex> lock(timeout_node->mutex);
@@ -480,10 +480,13 @@ TaskHandle<T> TaskHandle<T>::timeout(const Location& location, std::chrono::mill
             executor->cancel_task(original_id);
             timeout_node->run_continuations();
         }
-    }).detach();
+    });
 
     // Original task completion continuation
-    node_->add_continuation([original_node, timeout_node]() {
+    node_->add_continuation([original_node, timeout_node, executor, timer_id]() {
+        // Cancel the timer if the task finished before timeout
+        executor->timer_manager_->cancel_timer(timer_id);
+
         bool should_trigger = false;
         {
             std::lock_guard<std::mutex> lock(timeout_node->mutex);
