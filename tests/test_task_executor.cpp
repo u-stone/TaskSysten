@@ -514,3 +514,30 @@ TEST(TaskExecutorTest, SynchronousBlockingWait) {
     h.wait();
     EXPECT_TRUE(done);
 }
+
+// Test 25: Recovery with value
+TEST(TaskExecutorTest, RecoverWithValue) {
+    TaskExecutor executor;
+    
+    auto h = executor.add_task(TASK_FROM_HERE, []() -> int {
+        throw std::runtime_error("Fail");
+        return 0;
+    }).recover(TASK_FROM_HERE, [](std::exception_ptr ex) -> int {
+        return 42; // Fallback value
+    });
+
+    EXPECT_EQ(h.get(), 42);
+}
+
+// Test 26: Recovery pass-through (no exception)
+TEST(TaskExecutorTest, RecoverPassThrough) {
+    TaskExecutor executor;
+    
+    auto h = executor.add_task(TASK_FROM_HERE, []() -> int {
+        return 100;
+    }).recover(TASK_FROM_HERE, [](std::exception_ptr ex) -> int {
+        return 42;
+    });
+
+    EXPECT_EQ(h.get(), 100);
+}

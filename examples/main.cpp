@@ -73,6 +73,39 @@ void exception_demo() {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 }
 
+void recovery_demo() {
+    LOG_INFO() << ">>> Starting Recovery Demo <<<";
+    TaskExecutor executor;
+
+    // Case 1: Recover from failure by providing a fallback value
+    executor.add_task(TASK_FROM_HERE, []() -> int {
+        LOG_INFO() << "Recovery Task 1: Simulating a failure...";
+        throw std::runtime_error("Database connection failed");
+        return 0;
+    }).recover(TASK_FROM_HERE, [](std::exception_ptr ex) -> int {
+        try {
+            if (ex) std::rethrow_exception(ex);
+        } catch (const std::exception& e) {
+            LOG_WARN() << "Recovery Task 1 failed: " << e.what() << ". Using fallback value 42.";
+        }
+        return 42; // Fallback value
+    }).then(TASK_FROM_HERE, [](int val) {
+        LOG_INFO() << "Recovery Task 1 Result: " << val;
+    });
+
+    // Case 2: Pass-through when successful (recover logic is skipped)
+    executor.add_task(TASK_FROM_HERE, []() -> int {
+        LOG_INFO() << "Recovery Task 2: Success case...";
+        return 100;
+    }).recover(TASK_FROM_HERE, [](std::exception_ptr ex) -> int {
+        return -1; // Won't be used
+    }).then(TASK_FROM_HERE, [](int val) {
+        LOG_INFO() << "Recovery Task 2 Result: " << val;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+}
+
 int main() {
     LOG_INFO() << "Starting Task Engine Example with Dynamic Thread Pool...";
 
@@ -117,6 +150,8 @@ int main() {
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
     exception_demo();
+
+    recovery_demo();
 
     stress_test();
 
