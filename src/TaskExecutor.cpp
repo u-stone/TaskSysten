@@ -28,7 +28,13 @@ TaskHandle<void> TaskExecutor::when_all(const Location& location, const std::vec
     auto counter = std::make_shared<std::atomic<size_t>>(handles.size());
     
     // Create the aggregate task, deferred.
-    auto [agg_handle, submit_fn] = submit_deferred<void>([](){}, nullptr, location.file_, location.line_, priority);
+    auto [agg_handle, submit_fn] = submit_deferred<void>([handles](){
+        for (const auto& h : handles) {
+            if (h.node_ && h.node_->exception) {
+                std::rethrow_exception(h.node_->exception);
+            }
+        }
+    }, nullptr, location.file_, location.line_, priority);
     auto shared_submit = std::make_shared<std::function<void()>>(std::move(submit_fn));
 
     for (const auto& h : handles) {

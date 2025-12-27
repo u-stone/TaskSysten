@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 #include <type_traits>
+#include <exception>
 #include <optional>
 
 #include "ThreadPool.h" // Include the new ThreadPool header
@@ -26,6 +27,7 @@ struct TaskNodeBase {
     std::mutex mutex;
     bool is_finished = false;
     std::vector<std::function<void()>> continuations;
+    std::exception_ptr exception;
 
     virtual ~TaskNodeBase() = default;
 
@@ -118,6 +120,10 @@ public:
 
     template <typename Func, typename... Args, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Func>, TaskPriority>>>
     auto then(const Location& location, Func&& f, Args&&... args);
+
+    // Catch and handle exceptions from upstream
+    template <typename Func>
+    TaskHandle<void> on_error(const Location& location, Func&& f);
 
 private:
     friend class TaskExecutor;
@@ -244,19 +250,19 @@ private:
     template <typename T>
     std::function<void()> create_task_wrapper(TaskID id, std::shared_ptr<std::conditional_t<std::is_void_v<T>, TaskNodeBase, TaskNode<T>>> node, std::function<T()> task, std::function<void()> callback, const char* file, int line) {
         return [this, id, node, task = std::move(task), callback = std::move(callback), file = std::string(file), line]() mutable {
-            bool is_cancelled = false;
-            {
-                std::lock_guard<std::mutex> lock(status_mutex_);
-                auto it = cancelled_tasks_.find(id);
-                if (it != cancelled_tasks_.end()) {
-                    is_cancelled = true;
-                    cancelled_tasks_.erase(it);
+            try {
+                bool is_cancelled = false;
+                {
+                    std::lock_guard<std::mutex> lock(status_mutex_);
+                    auto it = cancelled_tasks_.find(id);
+                    if (it != cancelled_tasks_.end()) {
+                        is_cancelled = true;
+                        cancelled_tasks_.erase(it);
+                    }
                 }
-            }
-            if (is_cancelled) return;
+                if (is_cancelled) return;
 
-            if (task) {
-                try {
+                if (task) {
                     auto start_time = std::chrono::steady_clock::now();
                     if constexpr (std::is_void_v<T>) {
                         task();
@@ -268,15 +274,19 @@ private:
                     if (duration_ms > 500) {
                         LOG_WARN() << "Task " << id << " (" << file << ":" << line << ") execution time " << duration_ms << "ms exceeded 500ms threshold";
                     }
-                } catch (const std::exception& e) {
-                    LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw exception: " << e.what();
-                } catch (...) {
-                    LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw unknown exception.";
                 }
-            }
 
-            if (callback) callback();
-            if constexpr (std::is_void_v<T>) node->run_continuations();
+                if (callback) callback();
+                if constexpr (std::is_void_v<T>) node->run_continuations();
+            } catch (const std::exception& e) {
+                node->exception = std::current_exception();
+                LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw exception: " << e.what();
+                node->run_continuations();
+            } catch (...) {
+                node->exception = std::current_exception();
+                LOG_ERROR() << "Task " << id << " (" << file << ":" << line << ") threw unknown exception.";
+                node->run_continuations();
+            }
         };
     }
 
@@ -318,12 +328,17 @@ auto TaskHandle<T>::then(const Location& location, TaskPriority priority, Func&&
     auto prev_node = node_;
     std::function<ResultType()> final_task_func;
 
+    auto check_exception = [prev_node]() {
+        if (prev_node && prev_node->exception) std::rethrow_exception(prev_node->exception);
+    };
+
     if constexpr (std::is_void_v<T>) {
         // Case 1: Previous task returned void.
         std::function<ResultType()> bound_f = static_cast<std::function<ResultType()>>(
             std::bind(std::forward<Func>(f), std::forward<Args>(args)...)
         );
-        final_task_func = [prev_node, bound_f = std::move(bound_f)]() mutable -> ResultType {
+        final_task_func = [check_exception, bound_f = std::move(bound_f)]() mutable -> ResultType {
+            check_exception();
             return bound_f();
         };
     } else {
@@ -331,7 +346,8 @@ auto TaskHandle<T>::then(const Location& location, TaskPriority priority, Func&&
         std::function<ResultType(T)> bound_f = static_cast<std::function<ResultType(T)>>(
             std::bind(std::forward<Func>(f), std::placeholders::_1, std::forward<Args>(args)...)
         );
-        final_task_func = [prev_node, bound_f = std::move(bound_f)]() mutable -> ResultType {
+        final_task_func = [prev_node, check_exception, bound_f = std::move(bound_f)]() mutable -> ResultType {
+            check_exception();
             return bound_f(std::move(*(prev_node->result)));
         };
     }
@@ -348,6 +364,26 @@ template <typename T>
 template <typename Func, typename... Args, typename>
 auto TaskHandle<T>::then(const Location& location, Func&& f, Args&&... args) {
     return then(location, this->priority_, std::forward<Func>(f), std::forward<Args>(args)...);
+}
+
+template <typename T>
+template <typename Func>
+TaskHandle<void> TaskHandle<T>::on_error(const Location& location, Func&& f) {
+    if (!exec_) return TaskHandle<void>();
+
+    auto prev_node = node_;
+    auto deferred_task = [prev_node, f = std::forward<Func>(f)]() mutable {
+        if (prev_node && prev_node->exception) {
+            f(prev_node->exception);
+        }
+    };
+
+    auto [handle, submit_fn] = exec_->template submit_deferred<void>(std::move(deferred_task), nullptr, location.file_, location.line_, this->priority_);
+
+    if (node_) {
+        node_->add_continuation(std::move(submit_fn));
+    }
+    return handle;
 }
 
 } // namespace task_engine

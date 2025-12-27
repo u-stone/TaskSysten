@@ -53,6 +53,26 @@ void stress_test() {
     LOG_INFO() << "Peak Worker Threads: " << executor.get_worker_count();
 }
 
+void exception_demo() {
+    LOG_INFO() << ">>> Starting Exception Propagation Demo <<<";
+    TaskExecutor executor;
+
+    executor.add_task(TASK_FROM_HERE, []() {
+        LOG_INFO() << "Task 1: Attempting to connect to service...";
+        throw std::runtime_error("Service Unavailable (HTTP 503)");
+    }).then(TASK_FROM_HERE, []() {
+        LOG_INFO() << "Task 2: This will be skipped due to Task 1 failure.";
+    }).on_error(TASK_FROM_HERE, [](std::exception_ptr ex) {
+        try {
+            if (ex) std::rethrow_exception(ex);
+        } catch (const std::exception& e) {
+            LOG_ERROR() << "Task Chain Error Handler: " << e.what();
+        }
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+}
+
 int main() {
     LOG_INFO() << "Starting Task Engine Example with Dynamic Thread Pool...";
 
@@ -95,6 +115,8 @@ int main() {
 
     // Give some time for tasks to process and for dynamic threads to potentially spawn
     std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    exception_demo();
 
     stress_test();
 

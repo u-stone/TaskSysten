@@ -311,6 +311,69 @@ TEST(TaskExecutorTest, PriorityInheritanceInChain) {
     EXPECT_EQ(order[1], "Low");
 }
 
+// Test 20: Exception Propagation and on_error handling
+TEST(TaskExecutorTest, ExceptionPropagationAndOnError) {
+    TaskExecutor executor;
+    std::atomic<bool> second_task_run{false};
+    std::atomic<bool> error_handler_run{false};
+    std::string error_msg;
+
+    executor.add_task(TASK_FROM_HERE, []() {
+        throw std::runtime_error("Initial Task Failed");
+    }).then(TASK_FROM_HERE, [&]() {
+        second_task_run = true; // Should be skipped
+    }).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        error_handler_run = true;
+        try {
+            if (ex) std::rethrow_exception(ex);
+        } catch (const std::exception& e) {
+            error_msg = e.what();
+        }
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_FALSE(second_task_run);
+    EXPECT_TRUE(error_handler_run);
+    EXPECT_EQ(error_msg, "Initial Task Failed");
+}
+
+// Test 21: Exception Propagation in when_all
+TEST(TaskExecutorTest, WhenAllExceptionPropagation) {
+    TaskExecutor executor;
+    std::atomic<bool> aggregate_error_caught{false};
+
+    auto h1 = executor.add_task(TASK_FROM_HERE, []() { 
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    });
+    auto h2 = executor.add_task(TASK_FROM_HERE, []() { 
+        throw std::runtime_error("Sub-task Failure");
+    });
+
+    executor.when_all(TASK_FROM_HERE, {h1, h2}).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        aggregate_error_caught = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_TRUE(aggregate_error_caught);
+}
+
+// Test 22: Recovery after on_error
+TEST(TaskExecutorTest, RecoveryAfterOnError) {
+    TaskExecutor executor;
+    std::atomic<int> step{0};
+
+    executor.add_task(TASK_FROM_HERE, []() {
+        throw std::runtime_error("Fail");
+    }).on_error(TASK_FROM_HERE, [&](std::exception_ptr ex) {
+        step = 1; // Handle error
+    }).then(TASK_FROM_HERE, [&]() {
+        step = 2; // Continue chain
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(step, 2);
+}
+
 // Test 19: WhenAll with Mixed Return Types
 TEST(TaskExecutorTest, WhenAllMixedTypes) {
     TaskExecutor executor;
