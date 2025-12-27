@@ -5,6 +5,7 @@
 #include <thread>
 #include <vector>
 #include <mutex>
+#include <unordered_set>
 
 using namespace task_engine;
 
@@ -108,4 +109,76 @@ TEST(TimerManagerTest, ConcurrentAdd) {
     // Wait for all timers to trigger
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     EXPECT_EQ(count, num_threads * timers_per_thread);
+}
+
+// Test 6: Exception in callback should not kill the manager
+TEST(TimerManagerTest, ExceptionInCallback) {
+    TimerManager manager;
+    std::atomic<bool> second_timer_executed{false};
+
+    manager.add_timer(std::chrono::milliseconds(10), []() {
+        throw std::runtime_error("Intentional exception");
+    });
+
+    manager.add_timer(std::chrono::milliseconds(50), [&]() {
+        second_timer_executed = true;
+    });
+
+    // Wait long enough for both timers to be processed
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    EXPECT_TRUE(second_timer_executed);
+}
+
+// Test 7: Cancel the earliest timer (head of the set)
+TEST(TimerManagerTest, CancelHeadTimer) {
+    TimerManager manager;
+    std::atomic<bool> first_executed{false};
+    std::atomic<bool> second_executed{false};
+
+    auto id1 = manager.add_timer(std::chrono::milliseconds(50), [&]() { first_executed = true; });
+    manager.add_timer(std::chrono::milliseconds(100), [&]() { second_executed = true; });
+
+    // Cancel the 50ms timer (the one the worker is likely waiting on)
+    manager.cancel_timer(id1);
+
+    // Wait for the 100ms timer to trigger
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_FALSE(first_executed);
+    EXPECT_TRUE(second_executed);
+}
+
+// Test 8: Rapid add and cancel
+TEST(TimerManagerTest, RapidAddAndCancel) {
+    TimerManager manager;
+    const int count = 1000;
+    std::atomic<int> executed_count{0};
+
+    for (int i = 0; i < count; ++i) {
+        auto id = manager.add_timer(std::chrono::milliseconds(100), [&]() { executed_count++; });
+        manager.cancel_timer(id);
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(executed_count, 0);
+}
+
+// Test 9: Destruction with pending timers
+TEST(TimerManagerTest, DestructionWithPendingTimers) {
+    {
+        TimerManager manager;
+        for (int i = 0; i < 100; ++i) {
+            manager.add_timer(std::chrono::seconds(10), []() {});
+        }
+        // manager goes out of scope here, worker thread should join cleanly
+    }
+}
+
+// Test 10: Timer ID uniqueness
+TEST(TimerManagerTest, TimerIDUniqueness) {
+    TimerManager manager;
+    std::unordered_set<TimerManager::TimerID> ids;
+    for (int i = 0; i < 1000; ++i) {
+        auto id = manager.add_timer(std::chrono::milliseconds(100), []() {});
+        EXPECT_TRUE(ids.insert(id).second) << "Duplicate TimerID detected: " << id;
+    }
 }
