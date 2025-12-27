@@ -69,8 +69,8 @@ struct Location {
 class TaskHandle {
 public:
     TaskHandle() = default;
-    TaskHandle(size_t id, std::shared_ptr<TaskNode> node, TaskExecutor* exec)
-        : id_(id), node_(std::move(node)), exec_(exec) {}
+    TaskHandle(size_t id, std::shared_ptr<TaskNode> node, TaskExecutor* exec, TaskPriority priority)
+        : id_(id), node_(std::move(node)), exec_(exec), priority_(priority) {}
 
     // Implicit conversion to TaskID (size_t) for backward compatibility
     operator size_t() const { return id_; }
@@ -88,6 +88,7 @@ private:
     size_t id_ = 0;
     std::shared_ptr<TaskNode> node_;
     TaskExecutor* exec_ = nullptr;
+    TaskPriority priority_ = TaskPriority::NORMAL;
 };
 
 /**
@@ -224,7 +225,7 @@ TaskHandle TaskHandle::then(const Location& location, TaskPriority priority, Fun
 
 template <typename Func, typename... Args, typename>
 TaskHandle TaskHandle::then(const Location& location, Func&& f, Args&&... args) {
-    return then(location, TaskPriority::NORMAL, std::forward<Func>(f), std::forward<Args>(args)...);
+    return then(location, this->priority_, std::forward<Func>(f), std::forward<Args>(args)...);
 }
 
 } // namespace task_engine

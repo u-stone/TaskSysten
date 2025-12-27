@@ -75,7 +75,7 @@ TaskHandle TaskExecutor::submit_internal(std::function<void()> task, std::functi
 
     // Submit the wrapped task to the underlying thread pool
     thread_pool_->submit(std::move(wrapped), priority);
-    return TaskHandle(id, node, this);
+    return TaskHandle(id, node, this, priority);
 }
 
 std::pair<TaskHandle, std::function<void()>> TaskExecutor::submit_deferred(std::function<void()> task, std::function<void()> callback, const char* file, int line, TaskPriority priority) {
@@ -89,7 +89,7 @@ std::pair<TaskHandle, std::function<void()>> TaskExecutor::submit_deferred(std::
         thread_pool_->submit(std::move(wrapped), priority);
     };
 
-    return { TaskHandle(id, node, this), std::move(submit_fn) };
+    return { TaskHandle(id, node, this, priority), std::move(submit_fn) };
 }
 
 TaskHandle TaskExecutor::when_all(const Location& location, const std::vector<TaskHandle>& handles, TaskPriority priority) {
