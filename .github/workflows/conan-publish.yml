@@ -1,0 +1,35 @@
+name: Conan Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Publish to Conan Remote
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conan
+        run: pip install conan
+
+      - name: Configure Conan Profile
+        run: conan profile detect
+
+      - name: Create Package
+        # Build the package locally to verify recipe and generate binaries
+        run: conan create . --build=missing
+
+      - name: Upload to Remote
+        # Only run if the secret CONAN_URL is set in GitHub Settings
+        if: ${{ secrets.CONAN_URL != '' }}
+        env:
+          CONAN_URL: ${{ secrets.CONAN_URL }}
+          CONAN_USER: ${{ secrets.CONAN_USER }}
+          CONAN_PASSWORD: ${{ secrets.CONAN_PASSWORD }}
+        run: |
+          conan remote add task-engine-remote "$CONAN_URL"
+          conan remote login task-engine-remote "$CONAN_USER" -p "$CONAN_PASSWORD"
+          # Upload the package (recipe + binaries)
+          conan upload task-engine -r task-engine-remote
