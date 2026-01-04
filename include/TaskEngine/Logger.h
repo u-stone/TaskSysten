@@ -4,6 +4,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <TaskEngine/TaskEngineExport.h>
 
 namespace task_engine {
 
@@ -18,7 +19,7 @@ enum class LogLevel {
  * @brief Interface for custom log output implementations.
  *        Users can implement this to redirect logs to files, network, etc.
  */
-class ILogOutput {
+class TASK_ENGINE_EXPORT ILogOutput {
 public:
     virtual ~ILogOutput() = default;
     virtual void write(LogLevel level, const std::string& message) = 0;
@@ -27,7 +28,7 @@ public:
 /**
  * @brief Default log output implementation using std::cout and std::cerr.
  */
-class StdLogOutput : public ILogOutput {
+class TASK_ENGINE_EXPORT StdLogOutput : public ILogOutput {
 public:
     void write(LogLevel level, const std::string& message) override;
 };
@@ -35,7 +36,7 @@ public:
 /**
  * @brief Thread-safe Singleton Logger class.
  */
-class Logger {
+class TASK_ENGINE_EXPORT Logger {
 public:
     static Logger& instance();
 

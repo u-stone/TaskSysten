@@ -1,5 +1,6 @@
-#include "TaskExecutor.h"
-#include "Logger.h"
+#include "TaskEngine/TaskExecutor.h"
+#include "TaskEngine/version.h"
+#include "TaskEngine/Logger.h"
 #include <chrono>
 #include <atomic>
 #include <vector>
@@ -83,7 +84,7 @@ void timeout_demo() {
 }
 
 int main() {
-    LOG_INFO() << "Starting Task Engine Example with Dynamic Thread Pool...";
+    LOG_INFO() << "Starting Task Engine v" << TASK_ENGINE_VERSION << " (" << TASK_ENGINE_GIT_HASH << ") with Dynamic Thread Pool...";
 
     // 1. Initialize Executor with custom configuration
     ThreadPoolConfig config;

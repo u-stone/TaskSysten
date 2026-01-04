@@ -10,6 +10,7 @@
 #include <algorithm> // For std::max
 #include <chrono>
 #include <deque>
+#include <TaskEngine/TaskEngineExport.h>
 
 namespace task_engine {
 
@@ -39,7 +40,7 @@ struct ThreadPoolConfig {
  * @brief A dynamic thread pool that manages worker threads and a task queue.
  *        It can grow its thread count based on queue load.
  */
-class ThreadPool {
+class TASK_ENGINE_EXPORT ThreadPool {
 public:
     /**
      * @brief Constructs a ThreadPool with dynamic sizing capabilities.

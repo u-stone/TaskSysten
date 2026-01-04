@@ -1,0 +1,40 @@
+name: Vcpkg CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: ${{ matrix.os }} Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Ensure git history is available for versioning
+
+    - name: Configure CMake
+      # We use the pre-installed vcpkg toolchain and enable the 'tests' feature defined in vcpkg.json
+      run: >
+        cmake -B build -S .
+        -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake
+        -DVCPKG_MANIFEST_FEATURES=tests
+        -DTASK_ENGINE_BUILD_TESTS=ON
+        -DTASK_ENGINE_BUILD_EXAMPLES=ON
+
+    - name: Build TaskEngine
+      run: cmake --build build --config Release
+
+    - name: Run Tests
+      shell: bash
+      run: |
+        cd build
+        ctest -C Release --output-on-failure
