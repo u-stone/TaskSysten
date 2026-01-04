@@ -1,0 +1,45 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New Version (e.g., 1.0.1)'
+        required: true
+        type: string
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Version Files
+        run: |
+          NEW_VERSION=${{ inputs.version }}
+          echo "Bumping version to $NEW_VERSION"
+          
+          # Update CMakeLists.txt
+          # Replaces: project(TaskEngine VERSION 1.0.0 ...) -> project(TaskEngine VERSION 1.0.1 ...)
+          # [0-9.]* matches the version number (digits and dots)
+          sed -i "s/project(TaskEngine VERSION [0-9.]*/project(TaskEngine VERSION $NEW_VERSION/" CMakeLists.txt
+          
+          # Update vcpkg.json
+          # Uses jq to safely update the "version-string" field
+          jq --arg v "$NEW_VERSION" '.["version-string"] = $v' vcpkg.json > vcpkg.json.tmp && mv vcpkg.json.tmp vcpkg.json
+
+      - name: Commit and Push Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add CMakeLists.txt vcpkg.json
+          git commit -m "Bump version to ${{ inputs.version }}"
+          git tag "v${{ inputs.version }}"
+          
+          git push origin main
+          git push origin "v${{ inputs.version }}"
