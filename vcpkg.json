@@ -1,6 +1,6 @@
 {
   "name": "task-engine",
-  "version-string": "1.0.0",
+  "version-string": "0.0.1",
   "description": "A high-performance, thread-safe C++17 Task Execution Module.",
   "homepage": "https://github.com/YourUsername/TaskSystem",
   "license": "MIT",
