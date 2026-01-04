@@ -15,9 +15,11 @@
 #include <exception>
 #include <optional>
 
-#include "ThreadPool.h" // Include the new ThreadPool header
-#include "Logger.h" // Required for LOG_WARN, LOG_ERROR macros
-#include "TimerManager.h"
+#include <TaskEngine/ThreadPool.h>
+#include <TaskEngine/Logger.h>
+#include <TaskEngine/TimerManager.h>
+#include <TaskEngine/TaskEngineExport.h>
+
 namespace task_engine {
 
 class TaskExecutor; // Forward declaration
@@ -25,7 +27,7 @@ class TaskExecutor; // Forward declaration
 /**
  * @brief Internal structure to manage task dependencies.
  */
-struct TaskNodeBase {
+struct TASK_ENGINE_EXPORT TaskNodeBase {
     std::mutex mutex;
     std::condition_variable cv;
     bool is_finished = false;
@@ -153,7 +155,7 @@ private:
 /**
  * @brief A thread-safe task execution module supporting cancellation and callbacks.
  */
-class TaskExecutor {
+class TASK_ENGINE_EXPORT TaskExecutor {
 public:
     using TaskID = size_t;
 

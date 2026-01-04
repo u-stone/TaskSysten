@@ -7,9 +7,10 @@
 #include <thread>
 #include <atomic>
 #include <unordered_map>
+#include <TaskEngine/TaskEngineExport.h>
 
 namespace task_engine {
-class TimerManager {
+class TASK_ENGINE_EXPORT TimerManager {
 public:
     using TimerID = uint64_t;
     TimerManager();
