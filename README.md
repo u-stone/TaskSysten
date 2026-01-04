@@ -1,5 +1,8 @@
 # TaskEngine
 
+![Vcpkg CI](https://github.com/YourUsername/TaskSystem/actions/workflows/vcpkg-ci.yml/badge.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+
 A high-performance, thread-safe C++17 Task Execution Module.
 
 ## Features
@@ -7,13 +10,32 @@ A high-performance, thread-safe C++17 Task Execution Module.
 *   **Task Management**: Add and cancel tasks dynamically.
 *   **Flexibility**: Supports functions, lambdas, and functors with arbitrary arguments.
 *   **Callbacks**: Built-in support for task completion callbacks.
-*   **Concurrency**: Configurable thread pool size.
+*   **Concurrency**: Configurable thread pool size and scaling strategy.
 *   **Safety**: Thread-safe design preventing data races and deadlocks.
+*   **Integration**: Easy integration via CMake, vcpkg, and Conan.
 
 ## Requirements
 
 *   C++17 compliant compiler (GCC, Clang, MSVC)
 *   CMake 3.14 or higher
+
+## Integration
+
+Detailed integration instructions can be found in the [Integration Guide](doc/IntegrationGuide.md).
+
+### Quick Start (FetchContent)
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  TaskEngine
+  GIT_REPOSITORY https://github.com/YourUsername/TaskSystem.git
+  GIT_TAG        v1.0.0
+)
+FetchContent_MakeAvailable(TaskEngine)
+
+target_link_libraries(MyApp PRIVATE task_engine::task_engine)
+```
 
 ## Build Instructions
 
@@ -24,32 +46,38 @@ A high-performance, thread-safe C++17 Task Execution Module.
     ```
 3.  Configure the project:
     ```bash
-    cmake ..
+    cmake .. -DTASK_ENGINE_BUILD_TESTS=ON -DTASK_ENGINE_BUILD_EXAMPLES=ON
     ```
 4.  Build:
     ```bash
-    cmake --build .
+    cmake --build . --config Release
     ```
 
 ## Usage
 
 ```cpp
-#include "TaskExecutor.h"
+#include <TaskEngine/TaskExecutor.h>
+#include <iostream>
 
 int main() {
-    // Initialize TaskExecutor, which internally creates a ThreadPool
-    // min_threads=2, max_threads=8, grow_threshold=3 for the underlying thread pool
-    task_engine::TaskExecutor executor(2, 8, 3); 
+    // Configure the thread pool
+    task_engine::ThreadPoolConfig config;
+    config.min_threads = 2;
+    config.max_threads = 8;
+
+    // Initialize TaskExecutor
+    task_engine::TaskExecutor executor(config); 
 
     // Add a simple task
-    executor.add_task([]{ 
+    executor.add_task(TASK_FROM_HERE, []{ 
         std::cout << "Hello World" << std::endl; 
     });
 
     // Add task with callback
     executor.add_task_with_callback(
-        []{ do_work(); },
-        []{ on_complete(); }
+        TASK_FROM_HERE,
+        []{ /* do work */ },
+        []{ /* on complete */ }
     );
     
     return 0;
