@@ -51,6 +51,11 @@ jobs:
         cd build
         ctest -C Release --output-on-failure
 
+    - name: List installed files (for verification)
+      if: startsWith(github.ref, 'refs/tags/')
+      shell: bash
+      run: |
+        ls -R instdir || dir /s instdir
     - name: Package
       if: startsWith(github.ref, 'refs/tags/')
       shell: bash
