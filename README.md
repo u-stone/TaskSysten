@@ -29,9 +29,10 @@ Detailed integration instructions can be found in the [Integration Guide](doc/In
 include(FetchContent)
 FetchContent_Declare(
   TaskEngine
-  GIT_REPOSITORY https://github.com/YourUsername/TaskSystem.git
-  GIT_TAG        v1.0.0
+  URL "https://github.com/u-stone/TaskSysten/archive/refs/tags/v0.0.3.zip"
+  GIT_TAG        v0.0.3
 )
+FetchContent_MakeAvailable(TaskEngine)
 FetchContent_MakeAvailable(TaskEngine)
 
 target_link_libraries(MyApp PRIVATE task_engine::task_engine)
